@@ -8,7 +8,7 @@ const file = path.join(__dirname, "..", "custom_components", "aldi_boodschappen"
 const ctx = { HTMLElement: class {}, customElements: { define() {} }, console };
 vm.createContext(ctx);
 vm.runInContext(fs.readFileSync(file, "utf8"), ctx);
-const { computeTotals, sortResults, itemUrl } = ctx;
+const { computeTotals, sortResults, itemUrl, groupList } = ctx;
 
 // ---- totalen
 const NOW = 1_000_000;
@@ -51,3 +51,23 @@ assert.strictEqual(itemUrl({ store: "hoogvliet", name: "pink lady" }), "https://
 assert.strictEqual(itemUrl({ store: "aldi", name: "melk" }), "https://www.aldi.nl/zoeken.html?query=melk");
 assert.strictEqual(itemUrl({ name: "" }), null);
 console.log("itemUrl ok");
+
+// lijst per winkel: groepen op naam, "Overig" laatst, afgevinkt onderaan elke groep
+const li = [
+  { id: "1", name: "a", store_name: "Hoogvliet", code: "h:1", checked: true },
+  { id: "2", name: "b", store_name: "Aldi", code: "a:1", checked: false },
+  { id: "3", name: "c", store_name: "Hoogvliet", code: "h:2", checked: false },
+  { id: "4", name: "d", checked: false },
+  { id: "5", name: "e", code: "oud", checked: false },
+];
+const flat = groupList(li, "added");
+assert.strictEqual(flat.length, 1);
+assert.strictEqual(flat[0].title, null);
+assert.strictEqual(flat[0].items.map((i) => i.id).join(""), "23451".replace("1", "") + "1", "afgevinkt onderaan");
+const grouped = groupList(li, "store");
+assert.strictEqual(grouped.map((g) => g.title).join("|"), "Aldi|Hoogvliet|Overig");
+assert.strictEqual(grouped[0].items.map((i) => i.id).join(""), "25", "oud item zonder winkelnaam is Aldi");
+assert.strictEqual(grouped[1].items.map((i) => i.id).join(""), "31", "afgevinkt onderaan");
+assert.strictEqual(grouped[2].items.map((i) => i.id).join(""), "4");
+assert.strictEqual(groupList([], "store").length, 0);
+console.log("groupList ok");

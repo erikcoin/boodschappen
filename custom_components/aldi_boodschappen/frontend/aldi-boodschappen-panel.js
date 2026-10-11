@@ -14,6 +14,10 @@ const T = {
   addPlain: "Voeg toe als losse tekst",
   add: "Toevoegen",
   everyWeek: "Elke week",
+  listSort: "Lijst sorteren",
+  listSortAdded: "Volgorde van toevoegen",
+  listSortStore: "Per winkel",
+  other: "Overig",
   list: "Mijn lijst",
   empty: "Je lijst is leeg. Zoek hierboven een product.",
   newWeek: "Nieuwe week starten",
@@ -40,6 +44,26 @@ const money = (v, cur = "€") =>
 
 /* Producten die vóór de winkelkeuze zijn toegevoegd hebben geen winkelnaam: dat waren altijd Aldi-producten. */
 const storeOf = (item) => item.store_name || "Aldi";
+
+/* Winkel waaronder een item in de lijst valt; eigen tekst zonder product staat onder "Overig". */
+function groupKey(item) {
+  return item.store_name || (item.code ? "Aldi" : T.other);
+}
+
+/* Verdeelt de lijst in groepen. Afgevinkte items staan steeds onderaan hun groep. Pure functie. */
+function groupList(items, mode) {
+  const open = (list) => [...list.filter((i) => !i.checked), ...list.filter((i) => i.checked)];
+  if (mode !== "store") return [{ title: null, items: open(items) }];
+  const groups = new Map();
+  for (const i of items) {
+    const k = groupKey(i);
+    if (!groups.has(k)) groups.set(k, []);
+    groups.get(k).push(i);
+  }
+  return [...groups.entries()]
+    .sort(([a], [b]) => (a === T.other) - (b === T.other) || a.localeCompare(b, "nl"))
+    .map(([title, list]) => ({ title, items: open(list) }));
+}
 
 /* Link van een item; zonder eigen link een zoekpagina van de winkel, zodat er altijd iets te klikken is. */
 function itemUrl(it) {
@@ -100,6 +124,7 @@ class AldiBoodschappenPanel extends HTMLElement {
     this._shown = [];
     this._warnings = [];
     this._sort = "relevance";
+    this._listSort = (() => { try { return localStorage.getItem("aldi_list_sort") === "store" ? "store" : "added"; } catch (e) { return "added"; } })();
     this._query = "";
     this._status = ""; // "", "loading", "error:..."
     this._unsub = null;
@@ -210,6 +235,8 @@ class AldiBoodschappenPanel extends HTMLElement {
         .row .old-price { color:var(--warning-color, #b36b00); font-size:11px; }
         .empty { padding:24px; text-align:center; color:var(--secondary-text-color); }
         .sortbar { display:flex; align-items:center; gap:8px; margin:8px 0 0; font-size:13px; color:var(--secondary-text-color); }
+        .grouphd { display:flex; justify-content:space-between; margin:14px 0 4px; padding-bottom:4px; border-bottom:1px solid var(--divider-color); font-weight:600; font-size:14px; }
+        .grouphd span:last-child { font-weight:400; color:var(--secondary-text-color); }
         .sortbar[hidden] { display:none; }
         .sortbar select { font-size:13px; padding:6px 8px; border-radius:8px; border:1px solid var(--divider-color); background:var(--card-background-color); color:var(--primary-text-color); }
         .badges { display:flex; flex-wrap:wrap; gap:4px; }
@@ -236,6 +263,13 @@ class AldiBoodschappenPanel extends HTMLElement {
         </div>
         <div id="results" class="grid"></div>
         <h2>${T.list}</h2>
+        <div class="sortbar">
+          <label for="lsort">${T.listSort}</label>
+          <select id="lsort">
+            <option value="added">${T.listSortAdded}</option>
+            <option value="store">${T.listSortStore}</option>
+          </select>
+        </div>
         <div id="list" class="list"></div>
         <div id="total" class="total" hidden></div>
       </main>`;
@@ -258,6 +292,13 @@ class AldiBoodschappenPanel extends HTMLElement {
     sortSelect.addEventListener("change", (e) => {
       this._sort = e.target.value;
       this._renderResults();
+    });
+    const listSort = this.shadowRoot.getElementById("lsort");
+    listSort.value = this._listSort;
+    listSort.addEventListener("change", (e) => {
+      this._listSort = e.target.value;
+      try { localStorage.setItem("aldi_list_sort", this._listSort); } catch (err) { /* geen opslag beschikbaar */ }
+      this._renderList();
     });
     this.shadowRoot.getElementById("newweek").addEventListener("click", async () => {
       if (confirm(T.newWeekConfirm)) await this._ws({ type: "aldi_boodschappen/new_week" });
@@ -361,9 +402,8 @@ class AldiBoodschappenPanel extends HTMLElement {
       el.innerHTML = `<div class="empty">${T.empty}</div>`;
       return;
     }
-    const sorted = [...this._items].sort((a, b) => Number(a.checked) - Number(b.checked));
-    el.innerHTML = sorted
-      .map((it) => {
+    const money_ = (list) => list.reduce((s, i) => s + (!i.checked && i.price != null ? i.price * i.quantity : 0), 0);
+    const row = (it) => {
         const thumb = it.image
           ? `<img src="${escapeHtml(it.image)}" alt="" loading="lazy" referrerpolicy="no-referrer">`
           : `<div class="ph">🛒</div>`;
@@ -382,9 +422,17 @@ class AldiBoodschappenPanel extends HTMLElement {
           <div class="qty">
             <button data-dec="${it.id}">−</button><span>${it.quantity}</span><button data-inc="${it.id}">+</button>
           </div>
-          <span class="tag ${it.recurring ? "on" : ""}" data-rec-toggle="${it.id}" title="${T.recurring}">🔁 ${T.everyWeek}</span>
+          <span class="tag ${it.recurring ? "on" : ""}" data-rec-toggle="${it.id}" title="${T.everyWeek}" aria-label="${T.everyWeek}" role="button">🔁</span>
           <button class="icon" data-del="${it.id}" title="${T.remove}">✕</button>
         </div>`;
+    };
+    el.innerHTML = groupList(this._items, this._listSort)
+      .map((g) => {
+        const sum = money_(g.items);
+        const head = g.title
+          ? `<div class="grouphd"><span>${escapeHtml(g.title)}</span><span>${sum ? money(sum) : ""}</span></div>`
+          : "";
+        return head + g.items.map(row).join("");
       })
       .join("");
   }

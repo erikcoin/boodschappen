@@ -6,6 +6,7 @@ Boodschappenlijst met producten van **Aldi** en/of **Hoogvliet**, met prijzen. K
 - **Prijzen vergelijken**: zoeken gaat over alle gekozen winkels tegelijk. Elk resultaat toont de prijs per kg, liter of stuk, je kunt sorteren op laagste prijs, en het goedkoopste product per eenheid krijgt een label.
 - Markeer per product of het **elke week** terug moet komen.
 - **Totaalprijs** van wat je nog moet halen, met een apart bedrag voor wat al in de wagen ligt en, als je bij meerdere winkels koopt, een subtotaal per winkel.
+- **Lijst per winkel**: kies boven de lijst "Per winkel" om je boodschappen per winkel gegroepeerd te zien, met het bedrag per winkel. De keuze wordt onthouden in je browser.
 - Eigen paneel **Boodschappen** in de zijbalk (live gesynchroniseerd tussen apparaten).
 - Dezelfde lijst is beschikbaar als `todo.boodschappen`, dus ook bruikbaar in dashboards, automatiseringen en via Assist.
 - **Nieuwe week**: afgevinkte eenmalige producten verdwijnen, terugkerende producten staan weer op "te halen". Dit gebeurt automatisch op een dag/tijd naar keuze, of via de knop/service.
