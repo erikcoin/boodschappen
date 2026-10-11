@@ -31,7 +31,7 @@ CHECKJEBON_URL = (
     "https://raw.githubusercontent.com/supermarkt/checkjebon/main/data/supermarkets.json"
 )
 HOOGVLIET_BASE_URL = "https://www.hoogvliet.com"
-HOOGVLIET_SEARCH_URL = "https://hoogvliet.nl/search/{query}"
+HOOGVLIET_API_URL = "https://hoogvliet.nl/api/graphql"
 CONF_HOOGVLIET_SOURCE = "hoogvliet_source"
 HOOGVLIET_SOURCE_CHECKJEBON = "checkjebon"
 HOOGVLIET_SOURCE_WEBSITE = "website"

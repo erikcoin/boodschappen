@@ -88,18 +88,17 @@ De Checkjebon-data bevat voor Hoogvliet alleen naam, prijs, hoeveelheid en een l
 - Er is geen foto (een winkelwagen-icoon), want het adres van de foto volgt uit het productnummer.
 - Een dubbele merknaam in de data ("Pink lady Pink lady op schaal") wordt ingekort tot "Pink lady op schaal". Het ontbrekende woord ("Appels") staat niet in de data.
 
-### Hoogvliet via de zoekfunctie van hoogvliet.nl (optioneel) — lees dit eerst
+### Hoogvliet via de webshop van hoogvliet.nl (optioneel) — lees dit eerst
 
 In de instellingen kies je bij **Bron voor Hoogvliet** tussen:
 
 - **Checkjebon-prijslijst** (standaard): geen enkel verzoek naar hoogvliet.nl, maar ook geen foto's en geen echte productlinks.
-- **Zoekfunctie van hoogvliet.nl**: foto's, echte links en de volledige productnamen, doordat de integratie bij elke zoekopdracht de zoekpagina van hoogvliet.nl ophaalt.
+- **Zoekfunctie van hoogvliet.nl**: foto's, echte links, volledige productnamen (merk + naam), de juiste hoeveelheid en of het product op voorraad is. De integratie vraagt bij elke zoekopdracht dezelfde GraphQL-API (`https://hoogvliet.nl/api/graphql`) op die de webshop zelf gebruikt.
 
-> **Waarschuwing.** `https://hoogvliet.nl/robots.txt` verbiedt voor alle crawlers het pad `/search`. Een integratie die daar automatisch een pagina ophaalt, is een geautomatiseerde client, ook als jij de zoekopdracht intypt. Door deze optie te kiezen neem je dat zelf voor je rekening. Hoogvliet kan dit verkeer blokkeren, en hun gebruiksvoorwaarden kunnen er iets over zeggen. Gebruik het alleen voor persoonlijk gebruik, met een paar zoekopdrachten per keer.
+> **Waarschuwing.** Dit is een niet-gedocumenteerde API van Hoogvliet, gebruikt zonder hun toestemming. Het pad `/api/graphql` staat niet in hun `robots.txt` (daarin staan `/search` en `/INTERSHOP/`), maar dat is geen toestemming: het blijft geautomatiseerd verkeer dat Hoogvliet kan blokkeren, en hun gebruiksvoorwaarden kunnen er iets over zeggen. De API kan ook zonder aankondiging veranderen. Gebruik het alleen voor persoonlijk gebruik, met een paar zoekopdrachten per keer. Door deze optie te kiezen neem je dat zelf voor je rekening.
 >
-> Om de belasting klein te houden doet de integratie: hooguit één verzoek per zoekopdracht, nooit sneller dan één verzoek per 3 seconden, resultaten 10 minuten onthouden, niets op de achtergrond, en een eerlijke User-Agent (`HomeAssistant-AldiBoodschappen/…`, dus geen vermomming als browser). Er wordt niets omzeild.
+> Om de belasting klein te houden doet de integratie: hooguit één verzoek per zoekopdracht (alleen de eerste 24 resultaten), nooit sneller dan één verzoek per 3 seconden, resultaten 10 minuten onthouden, niets op de achtergrond, en een eerlijke User-Agent (`HomeAssistant-AldiBoodschappen/…`, dus geen vermomming als browser). Er wordt niets omzeild.
 >
-> **Niet getest tegen de echte site.** De opbouw van de zoekpagina kon niet worden bekeken; de verwerking zoekt breed (ingebedde JSON en productlinks). Lukt het niet, dan valt de integratie terug op de Checkjebon-prijslijst en staat in het Home Assistant-log een regel *"Geen producten herkend op de Hoogvliet-zoekpagina"* met het begin van de pagina. Met die regel is de verwerking aan te passen. Wijzigt Hoogvliet de pagina, dan kan dit ook later ophouden te werken.
+> Mislukt een verzoek (of verandert Hoogvliet de API), dan valt de integratie terug op de Checkjebon-prijslijst en staat er een regel in het Home Assistant-log.
 >
-> Prijzen van producten die je via de zoekfunctie hebt toegevoegd worden niet automatisch bijgewerkt (alleen Aldi en Checkjebon-producten).
-
+> Prijzen van producten die je via de webshop hebt toegevoegd worden niet automatisch bijgewerkt (alleen Aldi en Checkjebon-producten).

@@ -315,39 +315,51 @@ assert hoogvliet.image_url(_l("pink-lady-726992000")) == "https://static.hoogvli
 print("linkvormen ok")
 
 
-# ---------------------------------------------------------------- live zoeken (aangenomen paginavorm)
-# 1. ingebedde JSON
-page_json = (
-    '<html><script id="__NEXT_DATA__" type="application/json">'
-    + json.dumps({"props": {"hits": [
-        {"title": "Pink lady Appels op schaal", "price": {"value": 3.59}, "url": "/product/pink-lady-appels-op-schaal-726992000", "packSize": "4 stuks"},
-        {"title": "Zonder prijs", "url": "/product/x-111111111"},
-        {"title": "Melk", "price": 1.1, "productNumber": 123456789},
-    ]}})
-    + "</script></html>"
-)
-res = web.parse_search_page(page_json)
-assert [x["name"] for x in res] == ["Pink lady Appels op schaal", "Melk"], res
-assert res[0]["url"] == "https://hoogvliet.nl/product/pink-lady-appels-op-schaal-726992000"
-assert res[0]["image"] == "https://static.hoogvliet.nl/ecom/product/726992000.jpg" and res[0]["size"] == "4 stuks"
-assert res[1]["image"] == "https://static.hoogvliet.nl/ecom/product/123456789.jpg"
-# 2. links in de HTML
-page_html = (
-    '<a href="/product/pink-lady-appels-op-schaal-726992000"><img alt="x"><span>Pink lady Appels op schaal</span> € 3,59</a>'
-    '<a href="/product/geen-prijs-222222222">alleen tekst</a>'
-)
-res = web.parse_search_page(page_html)
-assert len(res) == 1 and res[0]["price"] == 3.59 and res[0]["name"] == "Pink lady Appels op schaal", res
-# 3. onbekende pagina: leeg, en de client geeft een nette fout
-assert web.parse_search_page("<html>niets</html>") == []
+# ---------------------------------------------------------------- live zoeken (echte vorm van /api/graphql)
+def gq(key, name, price, regular=None, meta=None, stock="IN_STOCK"):
+    return {
+        "id": 6193, "stock_status": stock, "name": name, "url_key": key,
+        "metadata": json.dumps(meta) if meta is not None else None,
+        "price_range": {"maximum_price": None, "minimum_price": {
+            "regular_price": {"value": regular or price, "currency": "EUR"},
+            "final_price": {"value": price, "currency": "EUR"}, "discount": {"percent_off": 0}}},
+    }
+
+
+answer = {"data": {"products": {"items": [
+    gq("pink-lady-appels-op-schaal-726992000", "Appels op schaal", 3.39,
+       meta={"merk": "Pink lady", "inhoud_ce": 4, "eenheid": "Stuks", "ean": "8711905017940"}),
+    gq("volle-melk-111111111", "Volle melk", 1.09, regular=1.29, meta={"merk": "Melkan", "inhoud_ce": 1.5, "eenheid": "Liter"}),
+    gq("melkan-karnemelk-222222222", "Melkan karnemelk", 1.0, meta={"merk": "Melkan"}, stock="OUT_OF_STOCK"),
+    gq("geen-prijs-333333333", "Zonder prijs", 0),
+    {"name": "Zonder key", "price_range": {}},
+]}}}
+res = web.parse_response(answer)
+assert [x["name"] for x in res] == ["Pink lady Appels op schaal", "Melkan Volle melk", "Melkan karnemelk"], [x["name"] for x in res]
+a, b, c = res
+assert a["url"] == "https://hoogvliet.nl/product/pink-lady-appels-op-schaal-726992000"
+assert a["image"] == "https://static.hoogvliet.nl/ecom/product/726992000.jpg" and a["pid"] == "726992000"
+assert a["size"] == "4 stuks" and a["price"] == 3.39 and a["old_price"] is None and a["available"]
+assert b["size"] == "1.5 liter" and b["old_price"] == 1.29
+assert c["size"] is None and c["available"] is False, "uitverkocht"
+assert pricing.parse_size(a["size"]) == (4.0, "stuk") and pricing.parse_size(b["size"]) == (1.5, "l")
+assert web.parse_response({"data": {"products": {"items": []}}}) == []
+for bad in ("tekst", {"errors": [{"message": "kapot"}]}, {"data": None}):
+    try:
+        web.parse_response(bad)
+    except hoogvliet.HoogvlietError:
+        pass
+    else:
+        raise AssertionError(f"verwachtte fout voor {bad!r}")
 
 
 class WebSession:
     def __init__(self, body, status=200):
-        self.body, self.status, self.calls = body, status, 0
+        self.body, self.status, self.calls, self.last = body, status, 0, None
 
     def get(self, url, **kw):
         self.calls += 1
+        self.last = (url, kw)
         outer = self
 
         class Ctx:
@@ -368,11 +380,15 @@ async def _aread(b):
 
 
 web.MIN_INTERVAL = 0
-sess = WebSession(page_json.encode())
+sess = WebSession(json.dumps(answer).encode())
 ws = web.HoogvlietWebSearch(sess)
-assert len(asyncio.run(ws.search("Pink Lady"))) == 2
-assert len(asyncio.run(ws.search("pink  lady"))) == 2 and sess.calls == 1, "tweede keer uit het geheugen"
-for bad in (WebSession(b"<html></html>"), WebSession(b"", status=403)):
+assert len(asyncio.run(ws.search("Pink Lady"))) == 3
+assert len(asyncio.run(ws.search("pink  lady"))) == 3 and sess.calls == 1, "tweede keer uit het geheugen"
+url, kw = sess.last
+assert url == "https://hoogvliet.nl/api/graphql" and kw["params"]["operationName"] == "GetProductsSearch"
+assert json.loads(kw["params"]["variables"])["inputText"] == "pink lady"
+assert "HomeAssistant" in kw["headers"]["User-Agent"], "eerlijke User-Agent"
+for bad in (WebSession(b"<html></html>"), WebSession(b"", status=403), WebSession(b'{"errors":[{"message":"x"}]}')):
     try:
         asyncio.run(web.HoogvlietWebSearch(bad).search("x"))
     except hoogvliet.HoogvlietError:
@@ -381,13 +397,14 @@ for bad in (WebSession(b"<html></html>"), WebSession(b"", status=403)):
         raise AssertionError("verwachtte fout")
 
 # de Hoogvliet-client gebruikt live resultaten, en valt bij een fout terug op Checkjebon
-live = hoogvliet.HoogvlietClient(session=None, web=web.HoogvlietWebSearch(WebSession(page_json.encode())))
+live = hoogvliet.HoogvlietClient(session=None, web=web.HoogvlietWebSearch(WebSession(json.dumps(answer).encode())))
 out = asyncio.run(live.search("pink lady"))
-assert out[0]["name"] == "Pink lady Appels op schaal" and out[0]["code"].startswith("hoogvliet:web:")
-assert out[0]["image"].endswith("726992000.jpg") and out[0]["store"] == "hoogvliet"
+assert out[0]["name"] == "Pink lady Appels op schaal" and out[0]["code"] == "hoogvliet:web:726992000"
+assert out[0]["image"].endswith("726992000.jpg") and out[0]["store"] == "hoogvliet" and out[0]["brand"] == "Pink lady"
+assert out[2]["available"] is False
 fallback = hoogvliet.HoogvlietClient(session=None, web=web.HoogvlietWebSearch(WebSession(b"", status=503)))
 fallback._products = parsed
 fallback._fetched_at = 10**12
 fallback._loaded = True
 assert [x["name"] for x in asyncio.run(fallback.search("kwark"))][:1] == ["Volle kwark"], "terugval op Checkjebon"
-print("ok: live zoeken (JSON, HTML, terugval) klopt")
+print("ok: live zoeken (GraphQL, terugval) klopt")

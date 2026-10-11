@@ -3,7 +3,7 @@
     "step": {
       "user": {
         "title": "Aldi Shopping List",
-        "description": "Choose which stores to search. Pick both to search everywhere at once and see which product is cheapest. The Algolia key is only needed for Aldi: open aldi.nl, press F12, choose Network → Fetch/XHR, search the web shop and copy the value of x-algolia-api-key from the request to algolia.net. Hoogvliet needs no settings; its prices come from the open Checkjebon project and are refreshed daily. Source for Hoogvliet: 'Checkjebon' (default) uses a daily price list, without photos or real product links. 'hoogvliet.nl search' gives photos, links and full names, but makes one request per search to a page that Hoogvliet disallows for bots in robots.txt. Read the warning in the README first.",
+        "description": "Choose which stores to search. Pick both to search everywhere at once and see which product is cheapest. The Algolia key is only needed for Aldi: open aldi.nl, press F12, choose Network → Fetch/XHR, search the web shop and copy the value of x-algolia-api-key from the request to algolia.net. Hoogvliet needs no settings; its prices come from the open Checkjebon project and are refreshed daily. Source for Hoogvliet: 'Checkjebon' (default) uses a daily price list, without photos or real product links. 'hoogvliet.nl web shop' gives photos, links and full names, but makes one request per search to Hoogvliet's undocumented API, without their permission. Read the warning in the README first.",
         "data": {
           "reset_enabled": "Start new week automatically",
           "reset_weekday": "Reset day",
@@ -68,7 +68,7 @@
     "hoogvliet_source": {
       "options": {
         "checkjebon": "Checkjebon price list (default)",
-        "website": "hoogvliet.nl search (see warning in README)"
+        "website": "hoogvliet.nl web shop (see warning in README)"
       }
     }
   },

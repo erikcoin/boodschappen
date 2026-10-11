@@ -1,15 +1,10 @@
-"""Live zoeken via de zoekpagina van hoogvliet.nl (optioneel, staat standaard uit).
+"""Live zoeken in de webshop van hoogvliet.nl (optioneel, staat standaard uit).
 
-LET OP: hoogvliet.nl verbiedt in robots.txt het zoekpad (/search) voor bots. Deze
-module doet toch, alleen als de gebruiker dat zelf kiest, één verzoek per zoekopdracht
-naar die pagina. Zie de waarschuwing in de README. We beperken het zo veel mogelijk:
-nooit sneller dan één verzoek per paar seconden, resultaten tien minuten onthouden,
-niets op de achtergrond, en een eerlijke User-Agent.
-
-De opbouw van de zoekpagina is niet getest tegen de echte site, daarom is de verwerking
-bewust ruim: eerst ingebedde JSON (zoals __NEXT_DATA__) doorzoeken op producten, en pas
-daarna de links in de HTML. Lukt geen van beide, dan valt de integratie terug op
-Checkjebon en schrijft ze in het log wat ze zag.
+De webshop haalt zijn producten zelf op via een GraphQL-API (`/api/graphql`, zonder
+sleutel). Deze module doet precies zo'n verzoek, alleen als de gebruiker die bron kiest:
+één verzoek per zoekopdracht, nooit sneller dan één per paar seconden, resultaten tien
+minuten onthouden, niets op de achtergrond en een eerlijke User-Agent. Zie de
+opmerking in de README: dit is een niet-gedocumenteerde API zonder toestemming.
 """
 
 from __future__ import annotations
@@ -17,179 +12,112 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-import re
 import time
-from html import unescape
 from typing import Any
-from urllib.parse import quote, urljoin
 
 import aiohttp
 
-from .const import HOOGVLIET_SEARCH_URL, SEARCH_CACHE_SECONDS, USER_AGENT
-from .hoogvliet import IMAGE_URL, HoogvlietError, image_url, product_id
+from .const import HOOGVLIET_API_URL, SEARCH_CACHE_SECONDS, USER_AGENT
+from .hoogvliet import IMAGE_URL, HoogvlietError, product_id
 
 _LOGGER = logging.getLogger(__name__)
 
 MIN_INTERVAL = 3.0  # seconden tussen twee verzoeken
-MAX_PAGE_BYTES = 3_000_000
+MAX_BYTES = 3_000_000
+PAGE_SIZE = 24
+PRODUCT_URL = "https://hoogvliet.nl/product/{key}"
 
-_NAME_KEYS = ("name", "title", "productName", "displayName")
-_PRICE_KEYS = ("price", "currentPrice", "salesPrice", "sellingPrice", "priceValue", "regularPrice", "nowPrice")
-_URL_KEYS = ("url", "link", "href", "productUrl", "productURL", "path", "slug", "seoUrl")
-_ID_KEYS = ("productNumber", "productId", "sku", "articleNumber", "code", "id")
-_SIZE_KEYS = ("packSize", "unit", "unitSize", "content", "contentDescription", "quantity", "size", "packaging", "weight")
-_IMAGE_KEYS = ("image", "imageUrl", "imageURL", "thumbnail", "picture")
-_SCRIPT_JSON_RE = re.compile(
-    r"<script[^>]*type=[\"']application/(?:ld\+)?json[\"'][^>]*>(.*?)</script>", re.S | re.I
+# Alleen de velden die we nodig hebben (de webshop vraagt er veel meer op)
+QUERY = (
+    "query GetProductsSearch($pageSize: Int!, $currentPage: Int!, $inputText: String!, "
+    "$filters: ProductAttributeFilterInput!, $sort: ProductAttributeSortInput) { "
+    "products(pageSize: $pageSize, currentPage: $currentPage, search: $inputText, "
+    "filter: $filters, sort: $sort) { items { ... on ProductInterface { "
+    "id stock_status name url_key metadata "
+    "price_range { minimum_price { regular_price { value } final_price { value } } } "
+    "} } } }"
 )
-_PRICE_TEXT_RE = re.compile(r"(\d{1,3}(?:[.,]\d{1,2})?)")
-_ANCHOR_RE = re.compile(
-    r"<a\b[^>]*href=[\"']([^\"']*?/product/[^\"']*?-(\d{6,}))[\"'][^>]*>(.*?)</a>", re.S | re.I
-)
-_TAG_RE = re.compile(r"<[^>]+>")
 
 
-def _to_price(value: Any) -> float | None:
-    if isinstance(value, bool):
+def _number(value: Any) -> float | None:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
         return None
-    if isinstance(value, (int, float)):
-        return float(value) if value > 0 else None
-    if isinstance(value, str):
-        match = _PRICE_TEXT_RE.search(value.replace("€", " ").replace(",", "."))
-        if match:
-            try:
-                number = float(match.group(1))
-            except ValueError:
-                return None
-            return number if number > 0 else None
-    if isinstance(value, dict):
-        for key in ("value", "amount", "current", "now", "price", "selling"):
-            if key in value:
-                found = _to_price(value[key])
-                if found:
-                    return found
-    return None
+    return float(value) if value > 0 else None
 
 
-def _str(item: dict[str, Any], keys: tuple[str, ...]) -> str | None:
-    for key in keys:
-        value = item.get(key)
-        if isinstance(value, str) and value.strip():
-            return value.strip()
-        if isinstance(value, (int, float)) and not isinstance(value, bool) and key in _ID_KEYS:
-            return str(int(value))
-    return None
-
-
-def _candidate(item: dict[str, Any]) -> dict[str, Any] | None:
-    name = _str(item, _NAME_KEYS)
-    if not name or len(name) < 2:
-        return None
-    price = next((p for k in _PRICE_KEYS if (p := _to_price(item.get(k)))), None)
-    if price is None and isinstance(item.get("prices"), (dict, list)):
-        prices = item["prices"]
-        price = _to_price(prices if isinstance(prices, dict) else (prices[0] if prices else None))
-    if price is None:
-        return None
-
-    raw_url = _str(item, _URL_KEYS)
-    raw_id = _str(item, _ID_KEYS)
-    url = None
-    if raw_url:
-        url = urljoin("https://hoogvliet.nl/", raw_url if "/" in raw_url else f"/product/{raw_url}")
-    pid = product_id(url) or (raw_id if raw_id and raw_id.isdigit() and 6 <= len(raw_id) <= 12 else None)
-    if not pid and not url:
-        return None  # zonder link of nummer kunnen we er niets mee
-
-    image = None
-    for key in _IMAGE_KEYS:
-        value = item.get(key)
-        if isinstance(value, dict):
-            value = value.get("url") or value.get("src")
-        if isinstance(value, str) and value.startswith(("http://", "https://")):
-            image = value
-            break
-    if pid:
-        image = image or IMAGE_URL.format(id=pid)
-    return {
-        "name": " ".join(name.split()),
-        "price": price,
-        "size": _str(item, _SIZE_KEYS),
-        "url": url,
-        "pid": pid,
-        "image": image,
-    }
-
-
-def _walk(node: Any, out: list[dict[str, Any]], depth: int = 0) -> None:
-    if depth > 40:
-        return
-    if isinstance(node, dict):
-        found = _candidate(node)
-        if found:
-            out.append(found)
-        for value in node.values():
-            if isinstance(value, (dict, list)):
-                _walk(value, out, depth + 1)
-    elif isinstance(node, list):
-        for value in node:
-            if isinstance(value, (dict, list)):
-                _walk(value, out, depth + 1)
-
-
-def _json_blobs(page: str) -> list[Any]:
-    blobs: list[Any] = []
-    for match in _SCRIPT_JSON_RE.finditer(page):
+def _metadata(item: dict[str, Any]) -> dict[str, Any]:
+    raw = item.get("metadata")
+    if isinstance(raw, str):
         try:
-            blobs.append(json.loads(unescape(match.group(1))))
+            raw = json.loads(raw)
         except ValueError:
-            continue
-    return blobs
+            return {}
+    return raw if isinstance(raw, dict) else {}
 
 
-def _from_anchors(page: str) -> list[dict[str, Any]]:
+def _size(meta: dict[str, Any]) -> str | None:
+    """'4' + 'Stuks' -> '4 stuks'; '500' + 'Gram' -> '500 gram'."""
+    amount, unit = meta.get("inhoud_ce"), meta.get("eenheid")
+    if isinstance(amount, str):
+        try:
+            amount = float(amount.replace(",", "."))
+        except ValueError:
+            return None
+    if not isinstance(amount, (int, float)) or isinstance(amount, bool) or amount <= 0:
+        return None
+    if not isinstance(unit, str) or not unit.strip():
+        return None
+    number = int(amount) if float(amount).is_integer() else amount
+    return f"{number} {unit.strip().lower()}"
+
+
+def parse_response(data: Any) -> list[dict[str, Any]]:
+    """Producten uit het GraphQL-antwoord. Geeft een fout bij een onverwachte vorm."""
+    if not isinstance(data, dict):
+        raise HoogvlietError("Onverwacht antwoord van Hoogvliet")
+    items = ((data.get("data") or {}).get("products") or {}).get("items")
+    if not isinstance(items, list):
+        errors = data.get("errors")
+        message = errors[0].get("message") if isinstance(errors, list) and errors and isinstance(errors[0], dict) else None
+        _LOGGER.warning("Onverwachte opbouw van het Hoogvliet-antwoord: %.300r", data)
+        raise HoogvlietError(f"Hoogvliet gaf een fout: {message}" if message else "Onverwachte opbouw van het Hoogvliet-antwoord")
+
     found: list[dict[str, Any]] = []
-    for match in _ANCHOR_RE.finditer(page):
-        href, pid, inner = match.groups()
-        text = unescape(_TAG_RE.sub(" ", inner))
-        text = " ".join(text.split())
-        # De naam is de tekst vóór de eerste prijs, en de prijs de eerste € in het blok
-        euro = re.search(r"€\s*(\d+(?:[.,]\d{1,2})?)", text)
-        if not euro:
+    for item in items:
+        if not isinstance(item, dict):
             continue
-        name = text[: euro.start()].strip(" -–")
-        price = _to_price(euro.group(1))
-        if len(name) < 2 or not price:
+        key, name = item.get("url_key"), item.get("name")
+        if not isinstance(key, str) or not isinstance(name, str) or not name.strip():
             continue
+        minimum = ((item.get("price_range") or {}).get("minimum_price")) or {}
+        price = _number(((minimum.get("final_price")) or {}).get("value"))
+        if price is None:
+            continue
+        regular = _number(((minimum.get("regular_price")) or {}).get("value"))
+        meta = _metadata(item)
+        brand = meta.get("merk") if isinstance(meta.get("merk"), str) and meta["merk"].strip() else None
+        name = " ".join(name.split())
+        # De webshop toont merk + naam ("Pink lady" + "Appels op schaal")
+        full = f"{brand.strip()} {name}" if brand and not name.lower().startswith(brand.strip().lower()) else name
+        pid = product_id(f"/{key}")
         found.append(
             {
-                "name": name,
+                "name": full,
+                "brand": brand.strip() if brand else None,
                 "price": price,
-                "size": None,
-                "url": urljoin("https://hoogvliet.nl/", href),
-                "pid": pid,
-                "image": IMAGE_URL.format(id=pid),
+                "old_price": regular if regular and regular > price else None,
+                "size": _size(meta),
+                "url": PRODUCT_URL.format(key=key),
+                "pid": pid or str(item.get("id") or key),
+                "image": IMAGE_URL.format(id=pid) if pid else None,
+                "available": item.get("stock_status") in (None, "IN_STOCK"),
             }
         )
     return found
 
 
-def parse_search_page(page: str) -> list[dict[str, Any]]:
-    """Producten uit de HTML van de zoekpagina. Lege lijst als er niets herkend wordt."""
-    found: list[dict[str, Any]] = []
-    for blob in _json_blobs(page):
-        _walk(blob, found)
-    if not found:
-        found = _from_anchors(page)
-    unique: dict[str, dict[str, Any]] = {}
-    for product in found:
-        key = product["pid"] or product["url"] or product["name"]
-        unique.setdefault(key, product)
-    return list(unique.values())
-
-
 class HoogvlietWebSearch:
-    """Eén verzoek per zoekopdracht naar hoogvliet.nl, vertraagd en onthouden."""
+    """Eén verzoek per zoekopdracht naar de Hoogvliet-API, vertraagd en onthouden."""
 
     def __init__(self, session: aiohttp.ClientSession) -> None:
         self._session = session
@@ -208,30 +136,41 @@ class HoogvlietWebSearch:
             if wait > 0:
                 await asyncio.sleep(wait)
             self._last_request = time.monotonic()
-            page = await self._fetch(key)
+            data = await self._fetch(key)
 
-        products = parse_search_page(page)
-        if not products:
-            _LOGGER.warning(
-                "Geen producten herkend op de Hoogvliet-zoekpagina (%d tekens). Begin van de pagina: %r",
-                len(page),
-                page[:400],
-            )
-            raise HoogvlietError("De zoekpagina van Hoogvliet had een onbekende opbouw")
+        products = parse_response(data)
         self._cache[key] = (time.monotonic(), products)
         return products
 
-    async def _fetch(self, query: str) -> str:
-        url = HOOGVLIET_SEARCH_URL.format(query=quote(query, safe=""))
+    async def _fetch(self, query: str) -> Any:
+        params = {
+            "operationName": "GetProductsSearch",
+            "query": QUERY,
+            "variables": json.dumps(
+                {
+                    "pageSize": PAGE_SIZE,
+                    "currentPage": 1,
+                    "inputText": query,
+                    "filters": {"facets": []},
+                    "sort": {},
+                },
+                separators=(",", ":"),
+            ),
+        }
         try:
             async with self._session.get(
-                url,
-                headers={"User-Agent": USER_AGENT, "Accept": "text/html"},
+                HOOGVLIET_API_URL,
+                params=params,
+                headers={"User-Agent": USER_AGENT, "Accept": "application/json"},
                 timeout=aiohttp.ClientTimeout(total=15),
             ) as resp:
                 if resp.status != 200:
-                    raise HoogvlietError(f"Hoogvliet gaf status {resp.status} op de zoekpagina")
-                data = await resp.content.read(MAX_PAGE_BYTES)
+                    raise HoogvlietError(f"Hoogvliet gaf status {resp.status}")
+                body = await resp.content.read(MAX_BYTES)
         except (aiohttp.ClientError, TimeoutError) as err:
             raise HoogvlietError(f"Hoogvliet niet bereikbaar: {err}") from err
-        return data.decode("utf-8", "ignore")
+        try:
+            return json.loads(body)
+        except ValueError as err:
+            _LOGGER.warning("Hoogvliet gaf geen JSON terug. Begin: %.300r", body[:300])
+            raise HoogvlietError("Hoogvliet gaf geen geldig antwoord") from err

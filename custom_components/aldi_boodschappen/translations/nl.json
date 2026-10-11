@@ -3,7 +3,7 @@
     "step": {
       "user": {
         "title": "Aldi Boodschappen",
-        "description": "Kies in welke winkels je zoekt. Kies je beide, dan zoekt hij overal tegelijk en zie je welk product het goedkoopst is. De Algolia-sleutel is alleen nodig voor Aldi: open aldi.nl, druk op F12, kies Netwerk → Fetch/XHR, zoek iets in de webshop en kopieer bij het verzoek naar algolia.net de waarde van x-algolia-api-key. Hoogvliet heeft geen instellingen nodig; de prijzen komen van het open project Checkjebon en worden dagelijks bijgewerkt. Bron voor Hoogvliet: 'Checkjebon' (standaard) gebruikt een dagelijks bijgewerkte prijslijst, zonder foto's en zonder echte productlinks. 'Zoekfunctie van hoogvliet.nl' geeft foto's, links en volledige namen, maar doet per zoekopdracht één verzoek naar een pagina die Hoogvliet in robots.txt voor bots heeft afgesloten. Lees eerst de waarschuwing in de README.",
+        "description": "Kies in welke winkels je zoekt. Kies je beide, dan zoekt hij overal tegelijk en zie je welk product het goedkoopst is. De Algolia-sleutel is alleen nodig voor Aldi: open aldi.nl, druk op F12, kies Netwerk → Fetch/XHR, zoek iets in de webshop en kopieer bij het verzoek naar algolia.net de waarde van x-algolia-api-key. Hoogvliet heeft geen instellingen nodig; de prijzen komen van het open project Checkjebon en worden dagelijks bijgewerkt. Bron voor Hoogvliet: 'Checkjebon' (standaard) gebruikt een dagelijks bijgewerkte prijslijst, zonder foto's en zonder echte productlinks. 'Webshop van hoogvliet.nl' geeft foto's, links en volledige namen, maar doet per zoekopdracht één verzoek naar de niet-gedocumenteerde API van Hoogvliet, zonder hun toestemming. Lees eerst de waarschuwing in de README.",
         "data": {
           "reset_enabled": "Automatisch nieuwe week starten",
           "reset_weekday": "Dag van de reset",
@@ -68,7 +68,7 @@
     "hoogvliet_source": {
       "options": {
         "checkjebon": "Checkjebon-prijslijst (standaard)",
-        "website": "Zoekfunctie van hoogvliet.nl (zie waarschuwing in README)"
+        "website": "Webshop van hoogvliet.nl (zie waarschuwing in README)"
       }
     }
   },
