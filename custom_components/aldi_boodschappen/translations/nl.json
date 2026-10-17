@@ -75,7 +75,7 @@
   "services": {
     "new_week": {
       "name": "Nieuwe week starten",
-      "description": "Verwijdert afgevinkte eenmalige producten en zet terugkerende producten weer op 'te halen'."
+      "description": "Gaat naar de volgende week: een alvast klaargezette lijst wordt de huidige, anders komt er een nieuwe lijst met de terugkerende producten. De oude lijst blijft bewaard."
     },
     "add_item": {
       "name": "Product toevoegen",

@@ -9,7 +9,8 @@ Boodschappenlijst met producten van **Aldi** en/of **Hoogvliet**, met prijzen. K
 - **Lijst per winkel**: kies boven de lijst "Per winkel" om je boodschappen per winkel gegroepeerd te zien, met het bedrag per winkel. De keuze wordt onthouden in je browser.
 - Eigen paneel **Boodschappen** in de zijbalk (live gesynchroniseerd tussen apparaten).
 - Dezelfde lijst is beschikbaar als `todo.boodschappen`, dus ook bruikbaar in dashboards, automatiseringen en via Assist.
-- **Nieuwe week**: afgevinkte eenmalige producten verdwijnen, terugkerende producten staan weer op "te halen". Dit gebeurt automatisch op een dag/tijd naar keuze, of via de knop/service.
+- **Een lijst per week, bewaard**: elke week heeft een eigen lijst die je later kunt terugzien. Boven de lijst kies je welke je bekijkt: de **huidige** (die van `todo.boodschappen`), een **komende** week waar je alvast aan werkt, of een eerdere week uit de **geschiedenis**. Met "Nieuwe lijst" maak je een lijst voor de volgende week, met alleen je terugkerende producten, alles uit de bronlijst, of leeg. Met "Uit andere lijst" kies je producten uit een andere week en zet je ze op de lijst die je bekijkt.
+- **Nieuwe week**: de huidige lijst blijft bewaard. Heb je al een komende lijst klaargezet, dan wordt die de huidige; anders ontstaat er een nieuwe met je terugkerende producten (weer op "te halen"). Dit gebeurt automatisch op een dag/tijd naar keuze, of via de knop/service. Prijzen worden bijgewerkt voor de huidige en komende lijsten, niet voor de geschiedenis. Een bestaande lijst uit een eerdere versie wordt je eerste lijst.
 
 > Dit is een onofficiële integratie en staat los van Aldi en Hoogvliet.
 

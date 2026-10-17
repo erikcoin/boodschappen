@@ -133,4 +133,89 @@ n = m3.backfill_missing({"a|1": {"url": "U", "image": "I"}, "b|1": {"url": "nieu
 assert n == 3 and m3.items[0]["url"] == "U" and m3.items[1]["url"] == "oud" and m3.items[1]["image"] == "J"
 assert m3.items[2]["url"] is None
 
+# ---- meerdere lijsten ----
+import asyncio
+from datetime import date
+
+mm = manager_mod
+assert mm.week_name(date(2026, 10, 12)) == "Week 42 (12 okt)"
+assert mm.current_week_start(date(2026, 10, 7)) == date(2026, 10, 5), "woensdag: deze week"
+assert mm.current_week_start(date(2026, 10, 9)) == date(2026, 10, 12), "vanaf vrijdag: volgende week"
+
+L = mm.ShoppingManager(hass=None)
+assert len(L.lists) == 1 and L.items is L.active["items"]
+first = L.active_id
+milk = L.add("Melk", {"code": "a:1", "name": "Melk", "price": 1.0}, 2, recurring=True)
+L.add("Kaas", {"code": "a:2", "name": "Kaas", "price": 3.0}, 1, recurring=False)
+L.add("Brood")  # losse tekst
+L.update(milk["id"], checked=True)
+
+# alvast een volgende week beginnen: kopieert alleen terugkerende producten, niet afgevinkt
+nxt = L.create_list(source_id=first, copy="recurring")
+assert L.active_id == first, "de huidige lijst blijft de huidige"
+assert [i["name"] for i in nxt["items"]] == ["Melk"] and nxt["items"][0]["checked"] is False
+assert nxt["items"][0]["id"] != milk["id"] and nxt["items"][0]["quantity"] == 2
+assert date.fromisoformat(nxt["week_start"]) == date.fromisoformat(L.get_list(first)["week_start"]) + __import__("datetime").timedelta(days=7)
+assert [s["upcoming"] for s in L.summaries()] == [False, True]
+third = L.create_list("Feestweek", source_id=first, copy="none")
+assert third["name"] == "Feestweek" and third["items"] == []
+assert date.fromisoformat(third["week_start"]) == date.fromisoformat(nxt["week_start"]) + __import__("datetime").timedelta(days=7)
+
+# toevoegen aan een andere lijst dan de huidige
+L.add("Eieren", {"code": "a:3", "name": "Eieren", "price": 2.0}, 1, False, nxt["id"])
+assert [i["name"] for i in nxt["items"]] == ["Melk", "Eieren"] and "Eieren" not in [i["name"] for i in L.items]
+assert L.add("Eieren", {"code": "a:3", "name": "Eieren"}, 1, False, nxt["id"])["quantity"] == 2, "zelfde product samengevoegd in die lijst"
+
+# producten van een andere lijst overnemen
+kaas = next(i for i in L.items if i["name"] == "Kaas")
+brood = next(i for i in L.items if i["name"] == "Brood")
+assert L.copy_items([kaas["id"], brood["id"], "bestaat-niet"], third["id"]) == 2
+assert [(i["name"], i["checked"]) for i in third["items"]] == [("Kaas", False), ("Brood", False)]
+assert kaas in L.items and kaas["id"] not in [i["id"] for i in third["items"]], "kopie, geen verplaatsing"
+
+# prijzen: huidige en komende lijsten wel, geschiedenis niet
+L.set_active(nxt["id"])
+assert L.update_prices({"a:1": {"price": 1.5}}) == 1, "Melk staat in de geschiedenis (vorige week) en in nxt: alleen nxt telt"
+assert milk["price"] == 1.0 and nxt["items"][0]["price"] == 1.5
+L.set_active(first)
+assert L.update_prices({"a:3": {"price": 2.5}}) == 1 and nxt["items"][1]["price"] == 2.5, "komende lijst wordt bijgewerkt"
+
+# nieuwe week: een klaargezette lijst wordt de huidige; anders ontstaat er een nieuwe
+assert L.new_week()["id"] == nxt["id"] and L.active_id == nxt["id"]
+assert L.new_week()["id"] == third["id"]
+fresh = L.new_week()
+assert L.active_id == fresh["id"] and len(L.lists) == 4 and fresh["items"] == [], "Feestweek had geen terugkerende producten"
+assert [l["id"] for l in L.sorted_lists()] == [first, nxt["id"], third["id"], fresh["id"]]
+
+# hernoemen en verwijderen
+assert L.rename_list(first, "  Week 41  ") and L.get_list(first)["name"] == "Week 41"
+assert not L.rename_list(first, "  ") and not L.rename_list("x", "a")
+assert L.delete_list(fresh["id"]) and L.active_id == third["id"], "huidige verwijderd: buurlijst wordt huidige"
+assert not L.delete_list("x")
+for lid in [first, nxt["id"]]:
+    L.delete_list(lid)
+assert len(L.lists) == 1 and not L.delete_list(L.active_id), "de laatste lijst blijft"
+
+# laden: oude opslag (één lijst) en nieuwe opslag
+class LoadStore:
+    def __init__(self, data): self.data = data
+    async def async_load(self): return self.data
+    def async_delay_save(self, *a, **k): pass
+
+
+old = mm.ShoppingManager(hass=None)
+old._store = LoadStore({"items": [{"id": "1", "name": "Melk", "quantity": 1, "checked": False, "recurring": False}]})
+asyncio.run(old.async_load())
+assert len(old.lists) == 1 and old.items[0]["name"] == "Melk" and old.active_id == old.lists[0]["id"]
+saved = old._payload()
+assert saved["version"] == 2 and saved["lists"][0]["items"][0]["name"] == "Melk"
+again = mm.ShoppingManager(hass=None)
+again._store = LoadStore(saved)
+asyncio.run(again.async_load())
+assert again.active_id == old.active_id and again.items == old.items
+empty = mm.ShoppingManager(hass=None)
+empty._store = LoadStore(None)
+asyncio.run(empty.async_load())
+assert len(empty.lists) == 1 and empty.items == []
+
 print("ok:", len(products), "producten uit antwoord verwerkt, prijzen en totaal kloppen")

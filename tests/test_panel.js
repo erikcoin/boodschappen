@@ -8,7 +8,7 @@ const file = path.join(__dirname, "..", "custom_components", "aldi_boodschappen"
 const ctx = { HTMLElement: class {}, customElements: { define() {} }, console };
 vm.createContext(ctx);
 vm.runInContext(fs.readFileSync(file, "utf8"), ctx);
-const { computeTotals, sortResults, itemUrl, groupList } = ctx;
+const { computeTotals, sortResults, itemUrl, groupList, resolveView } = ctx;
 
 // ---- totalen
 const NOW = 1_000_000;
@@ -71,3 +71,9 @@ assert.strictEqual(grouped[1].items.map((i) => i.id).join(""), "31", "afgevinkt 
 assert.strictEqual(grouped[2].items.map((i) => i.id).join(""), "4");
 assert.strictEqual(groupList([], "store").length, 0);
 console.log("groupList ok");
+
+const ls = [{ id: "a" }, { id: "b" }];
+assert.strictEqual(resolveView(ls, "a", null), "a", "volgt de huidige lijst");
+assert.strictEqual(resolveView(ls, "a", "b"), "b");
+assert.strictEqual(resolveView(ls, "a", "weg"), "a", "verwijderde lijst: terug naar de huidige");
+console.log("resolveView ok");

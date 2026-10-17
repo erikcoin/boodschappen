@@ -75,7 +75,7 @@
   "services": {
     "new_week": {
       "name": "Start new week",
-      "description": "Removes checked one-off items and resets recurring items to 'to buy'."
+      "description": "Moves to the next week: a list prepared in advance becomes the current one, otherwise a new list with the recurring items is created. The old list is kept."
     },
     "add_item": {
       "name": "Add item",

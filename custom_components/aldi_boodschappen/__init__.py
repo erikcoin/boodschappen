@@ -82,6 +82,11 @@ async def async_setup(hass: HomeAssistant, config: dict) -> bool:
     websocket_api.async_register_command(hass, ws_update)
     websocket_api.async_register_command(hass, ws_remove)
     websocket_api.async_register_command(hass, ws_new_week)
+    websocket_api.async_register_command(hass, ws_list_create)
+    websocket_api.async_register_command(hass, ws_list_rename)
+    websocket_api.async_register_command(hass, ws_list_delete)
+    websocket_api.async_register_command(hass, ws_list_activate)
+    websocket_api.async_register_command(hass, ws_copy_items)
     websocket_api.async_register_command(hass, ws_refresh_prices)
     websocket_api.async_register_command(hass, ws_subscribe)
     return True
@@ -99,8 +104,9 @@ async def async_refresh_prices(hass: HomeAssistant) -> int:
     manager: ShoppingManager = runtime["manager"]
     search: SearchService = runtime["search"]
 
-    codes = {i["code"] for i in manager.items if i.get("code")}
-    names = list(dict.fromkeys(i["name"] for i in manager.items if i.get("code")))
+    live = manager.live_items()  # huidige en komende lijsten; de geschiedenis houdt zijn prijzen
+    codes = {i["code"] for i in live if i.get("code")}
+    names = list(dict.fromkeys(i["name"] for i in live if i.get("code")))
     updates: dict[str, dict[str, Any]] = {}
     for name in names[:40]:  # begrenzen: één zoekopdracht per uniek product
         try:
@@ -167,7 +173,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             # Producten die al op de lijst staan: ontbrekende link en foto aanvullen
             codes = {
                 i["code"]
-                for i in manager.items
+                for i in manager.all_items()
                 if i.get("store") == STORE_HOOGVLIET
                 and i.get("code")
                 and not (i.get("url") and i.get("image"))
@@ -299,13 +305,23 @@ async def ws_search(hass: HomeAssistant, connection, msg) -> None:
     connection.send_result(msg["id"], {"results": results, "warnings": warnings})
 
 
-@websocket_api.websocket_command({vol.Required("type"): f"{DOMAIN}/items"})
+def _state(manager: ShoppingManager) -> dict[str, Any]:
+    return {"lists": manager.summaries(), "active": manager.active_id, "items": manager.items}
+
+
+@websocket_api.websocket_command(
+    {vol.Required("type"): f"{DOMAIN}/items", vol.Optional("list_id"): cv.string}
+)
 @callback
 def ws_items(hass: HomeAssistant, connection, msg) -> None:
     runtime = _ensure_runtime(hass, connection, msg)
     if runtime is None:
         return
-    connection.send_result(msg["id"], {"items": runtime["manager"].items})
+    items = runtime["manager"].items_of(msg.get("list_id"))
+    if items is None:
+        connection.send_error(msg["id"], "not_found", "Lijst niet gevonden")
+        return
+    connection.send_result(msg["id"], {"items": items})
 
 
 @websocket_api.websocket_command(
@@ -315,6 +331,7 @@ def ws_items(hass: HomeAssistant, connection, msg) -> None:
         vol.Optional("product"): dict,
         vol.Optional("quantity", default=1): vol.Coerce(int),
         vol.Optional("recurring", default=False): cv.boolean,
+        vol.Optional("list_id"): cv.string,
     }
 )
 @websocket_api.async_response
@@ -325,8 +342,12 @@ async def ws_add(hass: HomeAssistant, connection, msg) -> None:
     product = msg.get("product")
     if product:
         product = await runtime["search"].enrich(product)  # bijv. een foto, best effort
-    item = runtime["manager"].add(
-        msg["name"], product, msg["quantity"], msg["recurring"]
+    manager: ShoppingManager = runtime["manager"]
+    if msg.get("list_id") and manager.get_list(msg["list_id"]) is None:
+        connection.send_error(msg["id"], "not_found", "Lijst niet gevonden")
+        return
+    item = manager.add(
+        msg["name"], product, msg["quantity"], msg["recurring"], msg.get("list_id")
     )
     connection.send_result(msg["id"], {"item": item})
 
@@ -371,9 +392,88 @@ def ws_new_week(hass: HomeAssistant, connection, msg) -> None:
     runtime = _ensure_runtime(hass, connection, msg)
     if runtime is None:
         return
-    runtime["manager"].new_week()
+    lst = runtime["manager"].new_week()
     hass.async_create_task(async_refresh_prices(hass))
-    connection.send_result(msg["id"], {})
+    connection.send_result(msg["id"], {"list_id": lst["id"]})
+
+
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): f"{DOMAIN}/list_create",
+        vol.Optional("name", default=""): cv.string,
+        vol.Optional("source_id"): cv.string,
+        vol.Optional("copy", default="recurring"): vol.In(["recurring", "all", "none"]),
+        vol.Optional("activate", default=False): cv.boolean,
+    }
+)
+@callback
+def ws_list_create(hass: HomeAssistant, connection, msg) -> None:
+    runtime = _ensure_runtime(hass, connection, msg)
+    if runtime is None:
+        return
+    lst = runtime["manager"].create_list(
+        msg["name"], msg.get("source_id"), msg["copy"], msg["activate"]
+    )
+    hass.async_create_task(async_refresh_prices(hass))
+    connection.send_result(msg["id"], {"list_id": lst["id"]})
+
+
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): f"{DOMAIN}/list_rename",
+        vol.Required("list_id"): cv.string,
+        vol.Required("name"): cv.string,
+    }
+)
+@callback
+def ws_list_rename(hass: HomeAssistant, connection, msg) -> None:
+    runtime = _ensure_runtime(hass, connection, msg)
+    if runtime is None:
+        return
+    ok = runtime["manager"].rename_list(msg["list_id"], msg["name"])
+    connection.send_result(msg["id"], {"renamed": ok})
+
+
+@websocket_api.websocket_command(
+    {vol.Required("type"): f"{DOMAIN}/list_delete", vol.Required("list_id"): cv.string}
+)
+@callback
+def ws_list_delete(hass: HomeAssistant, connection, msg) -> None:
+    runtime = _ensure_runtime(hass, connection, msg)
+    if runtime is None:
+        return
+    ok = runtime["manager"].delete_list(msg["list_id"])
+    connection.send_result(msg["id"], {"deleted": ok})
+
+
+@websocket_api.websocket_command(
+    {vol.Required("type"): f"{DOMAIN}/list_activate", vol.Required("list_id"): cv.string}
+)
+@callback
+def ws_list_activate(hass: HomeAssistant, connection, msg) -> None:
+    runtime = _ensure_runtime(hass, connection, msg)
+    if runtime is None:
+        return
+    ok = runtime["manager"].set_active(msg["list_id"])
+    if ok:
+        hass.async_create_task(async_refresh_prices(hass))
+    connection.send_result(msg["id"], {"activated": ok})
+
+
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): f"{DOMAIN}/copy_items",
+        vol.Required("item_ids"): [cv.string],
+        vol.Required("target_id"): cv.string,
+    }
+)
+@callback
+def ws_copy_items(hass: HomeAssistant, connection, msg) -> None:
+    runtime = _ensure_runtime(hass, connection, msg)
+    if runtime is None:
+        return
+    count = runtime["manager"].copy_items(msg["item_ids"], msg["target_id"])
+    connection.send_result(msg["id"], {"copied": count})
 
 
 @websocket_api.websocket_command({vol.Required("type"): f"{DOMAIN}/refresh_prices"})
@@ -396,7 +496,7 @@ def ws_subscribe(hass: HomeAssistant, connection, msg) -> None:
     @callback
     def _send() -> None:
         connection.send_message(
-            websocket_api.event_message(msg["id"], {"items": manager.items})
+            websocket_api.event_message(msg["id"], _state(manager))
         )
 
     connection.subscriptions[msg["id"]] = async_dispatcher_connect(

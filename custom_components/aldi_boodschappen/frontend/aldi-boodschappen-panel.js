@@ -18,6 +18,34 @@ const T = {
   listSortAdded: "Volgorde van toevoegen",
   listSortStore: "Per winkel",
   other: "Overig",
+  current: "huidige",
+  upcomingTag: "komende week",
+  historyTag: "eerder",
+  newList: "＋ Nieuwe lijst",
+  pick: "Producten overnemen",
+  rename: "Naam wijzigen",
+  deleteList: "Lijst verwijderen",
+  makeCurrent: "Maak dit de huidige lijst",
+  viewingUpcoming: "Je werkt alvast aan een komende week. De huidige lijst is",
+  viewingHistory: "Je bekijkt een eerdere lijst. De huidige lijst is",
+  newListTitle: "Nieuwe lijst",
+  nameLabel: "Naam",
+  namePlaceholder: "Leeg laten: de volgende week",
+  fromLabel: "Producten overnemen uit",
+  copyRecurring: "Alleen terugkerende producten",
+  copyAll: "Alle producten",
+  copyNone: "Niets, een lege lijst",
+  makeActive: "Meteen de huidige lijst maken",
+  cancel: "Annuleren",
+  create: "Maken",
+  pickTitle: "Producten overnemen op",
+  pickFrom: "Uit lijst",
+  pickAll: "Alles selecteren",
+  pickNone: "Geen andere lijst met producten.",
+  addSelected: "Toevoegen",
+  renamePrompt: "Nieuwe naam voor deze lijst:",
+  deleteConfirm: "Deze lijst en alle producten erop verwijderen?",
+  lastList: "De laatste lijst kan niet worden verwijderd.",
   list: "Mijn lijst",
   empty: "Je lijst is leeg. Zoek hierboven een product.",
   newWeek: "Nieuwe week starten",
@@ -28,7 +56,7 @@ const T = {
   refresh: "Prijzen bijwerken",
   refreshing: "Bezig…",
   newWeekConfirm:
-    "Afgevinkte eenmalige producten worden verwijderd en terugkerende producten worden weer op 'te halen' gezet. Doorgaan?",
+    "Naar de volgende week? De huidige lijst blijft bewaard. Een lijst die je al klaarzette wordt de huidige; anders ontstaat er een nieuwe met je terugkerende producten.",
   remove: "Verwijderen",
   error: "Zoeken mislukt",
   toBuy: "Te halen",
@@ -44,6 +72,11 @@ const money = (v, cur = "€") =>
 
 /* Producten die vóór de winkelkeuze zijn toegevoegd hebben geen winkelnaam: dat waren altijd Aldi-producten. */
 const storeOf = (item) => item.store_name || "Aldi";
+
+/* Welke lijst op het scherm staat: de gekozen lijst, of anders de huidige. Pure functie. */
+function resolveView(lists, activeId, viewId) {
+  return viewId && lists.some((l) => l.id === viewId) ? viewId : activeId;
+}
 
 /* Winkel waaronder een item in de lijst valt; eigen tekst zonder product staat onder "Overig". */
 function groupKey(item) {
@@ -120,6 +153,9 @@ class AldiBoodschappenPanel extends HTMLElement {
     super();
     this._hass = null;
     this._items = [];
+    this._lists = [];
+    this._activeId = "";
+    this._viewId = null; // null = de huidige lijst volgen
     this._results = [];
     this._shown = [];
     this._warnings = [];
@@ -172,8 +208,16 @@ class AldiBoodschappenPanel extends HTMLElement {
     if (this._unsub) return;
     this._unsub = this._hass.connection.subscribeMessage(
       (msg) => {
-        this._items = msg.items || [];
-        this._renderList();
+        this._lists = msg.lists || [];
+        this._activeId = msg.active || "";
+        if (this._viewId && !this._lists.some((l) => l.id === this._viewId)) this._viewId = null;
+        this._renderListBar();
+        if (this._viewing() === this._activeId) {
+          this._items = msg.items || [];
+          this._renderList();
+        } else {
+          this._loadViewed();
+        }
       },
       { type: "aldi_boodschappen/subscribe" }
     );
@@ -181,6 +225,29 @@ class AldiBoodschappenPanel extends HTMLElement {
 
   _ws(msg) {
     return this._hass.callWS(msg);
+  }
+
+  _viewing() {
+    return resolveView(this._lists, this._activeId, this._viewId);
+  }
+
+  async _loadViewed() {
+    const id = this._viewing();
+    if (!id) return;
+    try {
+      const res = await this._ws({ type: "aldi_boodschappen/items", list_id: id });
+      if (id !== this._viewing()) return; // intussen een andere lijst gekozen
+      this._items = res.items || [];
+    } catch (err) {
+      this._items = [];
+    }
+    this._renderList();
+  }
+
+  async _selectList(id) {
+    this._viewId = id && id !== this._activeId ? id : null;
+    this._renderListBar();
+    await this._loadViewed();
   }
 
   /* ---------- rendering ---------- */
@@ -237,6 +304,21 @@ class AldiBoodschappenPanel extends HTMLElement {
         .sortbar { display:flex; align-items:center; gap:8px; margin:8px 0 0; font-size:13px; color:var(--secondary-text-color); }
         .grouphd { display:flex; justify-content:space-between; margin:14px 0 4px; padding-bottom:4px; border-bottom:1px solid var(--divider-color); font-weight:600; font-size:14px; }
         .grouphd span:last-child { font-weight:400; color:var(--secondary-text-color); }
+        .listbar { display:flex; flex-wrap:wrap; align-items:center; gap:8px; margin:16px 0 4px; }
+        .listbar select { flex:1; min-width:180px; font-size:14px; padding:8px; border-radius:8px; border:1px solid var(--divider-color); background:var(--card-background-color); color:var(--primary-text-color); }
+        .listbar button, .dlg button { font-size:13px; padding:7px 12px; border-radius:16px; border:1px solid var(--divider-color); background:var(--card-background-color); color:var(--primary-text-color); cursor:pointer; }
+        .listbar button.main, .dlg button.main { background:var(--primary-color); border-color:var(--primary-color); color:var(--text-primary-color,#fff); }
+        .listnote { flex-basis:100%; font-size:13px; color:var(--secondary-text-color); }
+        .overlay { position:fixed; inset:0; background:rgba(0,0,0,.45); display:flex; align-items:center; justify-content:center; z-index:10; padding:16px; }
+        .overlay[hidden] { display:none; }
+        .dlg { background:var(--card-background-color); color:var(--primary-text-color); border-radius:12px; padding:16px; width:100%; max-width:440px; max-height:90vh; overflow:auto; display:flex; flex-direction:column; gap:12px; }
+        .dlg h3 { margin:0; font-size:18px; font-weight:500; }
+        .dlg label { display:flex; flex-direction:column; gap:4px; font-size:13px; color:var(--secondary-text-color); }
+        .dlg label.inline { flex-direction:row; align-items:center; gap:8px; color:var(--primary-text-color); }
+        .dlg input[type=text], .dlg select { font-size:15px; padding:8px; border-radius:8px; border:1px solid var(--divider-color); background:var(--primary-background-color); color:var(--primary-text-color); }
+        .dlg .btns { display:flex; justify-content:flex-end; gap:8px; }
+        .dlg .pickitems { display:flex; flex-direction:column; gap:6px; max-height:40vh; overflow:auto; }
+        .dlg .hint { margin:0; }
         .sortbar[hidden] { display:none; }
         .sortbar select { font-size:13px; padding:6px 8px; border-radius:8px; border:1px solid var(--divider-color); background:var(--card-background-color); color:var(--primary-text-color); }
         .badges { display:flex; flex-wrap:wrap; gap:4px; }
@@ -262,7 +344,8 @@ class AldiBoodschappenPanel extends HTMLElement {
           </select>
         </div>
         <div id="results" class="grid"></div>
-        <h2>${T.list}</h2>
+        <div id="listbar" class="listbar"></div>
+        <h2 id="listtitle">${T.list}</h2>
         <div class="sortbar">
           <label for="lsort">${T.listSort}</label>
           <select id="lsort">
@@ -272,7 +355,8 @@ class AldiBoodschappenPanel extends HTMLElement {
         </div>
         <div id="list" class="list"></div>
         <div id="total" class="total" hidden></div>
-      </main>`;
+      </main>
+      <div id="overlay" class="overlay" hidden></div>`;
 
     const input = this.shadowRoot.getElementById("q");
     input.value = this._query;
@@ -293,6 +377,13 @@ class AldiBoodschappenPanel extends HTMLElement {
       this._sort = e.target.value;
       this._renderResults();
     });
+    this.shadowRoot.getElementById("listbar").addEventListener("click", (e) => this._onListBarClick(e));
+    this.shadowRoot.getElementById("listbar").addEventListener("change", (e) => {
+      if (e.target.id === "listsel") this._selectList(e.target.value);
+    });
+    const overlay = this.shadowRoot.getElementById("overlay");
+    overlay.addEventListener("click", (e) => this._onOverlayClick(e));
+    overlay.addEventListener("change", (e) => this._onOverlayChange(e));
     const listSort = this.shadowRoot.getElementById("lsort");
     listSort.value = this._listSort;
     listSort.addEventListener("change", (e) => {
@@ -314,9 +405,163 @@ class AldiBoodschappenPanel extends HTMLElement {
     this.shadowRoot.getElementById("list").addEventListener("change", (e) => this._onListChange(e));
 
     this._rendered = true;
+    this._renderListBar();
     this._renderStatus();
     this._renderResults();
     this._renderList();
+  }
+
+  _renderListBar() {
+    const el = this.shadowRoot?.getElementById("listbar");
+    if (!el) return;
+    const view = this._viewing();
+    const cur = this._lists.find((l) => l.id === view);
+    const active = this._lists.find((l) => l.id === this._activeId);
+    const label = (l) => {
+      const tag = l.active ? T.current : l.upcoming ? T.upcomingTag : T.historyTag;
+      return `${l.name} · ${tag} (${l.count})`;
+    };
+    const note =
+      cur && !cur.active
+        ? `<div class="listnote">${cur.upcoming ? T.viewingUpcoming : T.viewingHistory} <b>${escapeHtml(active?.name || "")}</b>.</div>`
+        : "";
+    el.innerHTML = `
+      <select id="listsel" aria-label="${T.list}">
+        ${this._lists.map((l) => `<option value="${l.id}" ${l.id === view ? "selected" : ""}>${escapeHtml(label(l))}</option>`).join("")}
+      </select>
+      <button id="lnew" class="main">${T.newList}</button>
+      <button id="lpick">${T.pick}</button>
+      ${cur && !cur.active ? `<button id="lact">${T.makeCurrent}</button>` : ""}
+      <button id="lren" title="${T.rename}" aria-label="${T.rename}">✎</button>
+      <button id="ldel" title="${T.deleteList}" aria-label="${T.deleteList}">🗑</button>
+      ${note}`;
+    const title = this.shadowRoot.getElementById("listtitle");
+    if (title) title.textContent = cur ? `${T.list}: ${cur.name}` : T.list;
+  }
+
+  _openDialog(html) {
+    const ov = this.shadowRoot.getElementById("overlay");
+    ov.innerHTML = `<div class="dlg" role="dialog">${html}</div>`;
+    ov.hidden = false;
+    return ov;
+  }
+
+  _closeDialog() {
+    const ov = this.shadowRoot.getElementById("overlay");
+    ov.hidden = true;
+    ov.innerHTML = "";
+  }
+
+  _listOptions(selected, exclude) {
+    return this._lists
+      .filter((l) => l.id !== exclude)
+      .map((l) => `<option value="${l.id}" ${l.id === selected ? "selected" : ""}>${escapeHtml(l.name)}</option>`)
+      .join("");
+  }
+
+  _openCreate() {
+    const ov = this._openDialog(`
+      <h3>${T.newListTitle}</h3>
+      <label>${T.nameLabel}<input type="text" id="d-name" placeholder="${escapeHtml(T.namePlaceholder)}"></label>
+      <label>${T.fromLabel}<select id="d-src">${this._listOptions(this._viewing())}</select></label>
+      <label><select id="d-copy" aria-label="${T.fromLabel}">
+        <option value="recurring">${T.copyRecurring}</option>
+        <option value="all">${T.copyAll}</option>
+        <option value="none">${T.copyNone}</option>
+      </select></label>
+      <label class="inline"><input type="checkbox" id="d-act"> ${T.makeActive}</label>
+      <div class="btns"><button data-close>${T.cancel}</button><button class="main" id="d-ok">${T.create}</button></div>`);
+    ov.querySelector("#d-name").focus();
+  }
+
+  async _submitCreate() {
+    const q = (id) => this.shadowRoot.getElementById(id);
+    const activate = q("d-act").checked;
+    const res = await this._ws({
+      type: "aldi_boodschappen/list_create",
+      name: q("d-name").value.trim(),
+      source_id: q("d-src").value,
+      copy: q("d-copy").value,
+      activate,
+    });
+    this._closeDialog();
+    await this._selectList(res.list_id);
+  }
+
+  async _openPick() {
+    const target = this._viewing();
+    const others = this._lists.filter((l) => l.id !== target && l.count > 0);
+    if (!others.length) {
+      this._openDialog(`<h3>${T.pick}</h3><p class="hint">${T.pickNone}</p><div class="btns"><button data-close>${T.cancel}</button></div>`);
+      return;
+    }
+    const targetName = this._lists.find((l) => l.id === target)?.name || "";
+    this._pickSource = others[0].id;
+    this._openDialog(`
+      <h3>${T.pickTitle} ${escapeHtml(targetName)}</h3>
+      <label>${T.pickFrom}<select id="p-src">${others.map((l) => `<option value="${l.id}">${escapeHtml(l.name)}</option>`).join("")}</select></label>
+      <label class="inline"><input type="checkbox" id="p-all"> ${T.pickAll}</label>
+      <div class="pickitems" id="p-items"></div>
+      <div class="btns"><button data-close>${T.cancel}</button><button class="main" id="p-ok">${T.addSelected}</button></div>`);
+    await this._loadPickItems();
+  }
+
+  async _loadPickItems() {
+    const box = this.shadowRoot.getElementById("p-items");
+    if (!box) return;
+    const id = this.shadowRoot.getElementById("p-src").value;
+    this._pickSource = id;
+    let items = [];
+    try {
+      items = (await this._ws({ type: "aldi_boodschappen/items", list_id: id })).items || [];
+    } catch (err) {
+      /* lege lijst tonen */
+    }
+    if (id !== this._pickSource) return;
+    this.shadowRoot.getElementById("p-all").checked = false;
+    box.innerHTML = items
+      .map(
+        (i) => `<label class="inline"><input type="checkbox" data-pick="${i.id}"> ${escapeHtml(i.name)}${i.quantity > 1 ? ` (${i.quantity}×)` : ""}${i.recurring ? " 🔁" : ""}${i.store_name ? ` · ${escapeHtml(i.store_name)}` : ""}</label>`
+      )
+      .join("");
+  }
+
+  async _submitPick() {
+    const ids = [...this.shadowRoot.querySelectorAll("[data-pick]:checked")].map((c) => c.dataset.pick);
+    if (ids.length) await this._ws({ type: "aldi_boodschappen/copy_items", item_ids: ids, target_id: this._viewing() });
+    this._closeDialog();
+  }
+
+  async _onListBarClick(e) {
+    const id = e.target.closest("button")?.id;
+    const view = this._viewing();
+    const cur = this._lists.find((l) => l.id === view);
+    if (id === "lnew") this._openCreate();
+    else if (id === "lpick") await this._openPick();
+    else if (id === "lact") await this._ws({ type: "aldi_boodschappen/list_activate", list_id: view });
+    else if (id === "lren" && cur) {
+      const name = prompt(T.renamePrompt, cur.name);
+      if (name && name.trim()) await this._ws({ type: "aldi_boodschappen/list_rename", list_id: view, name });
+    } else if (id === "ldel" && cur) {
+      if (this._lists.length < 2) alert(T.lastList);
+      else if (confirm(`${T.deleteConfirm}\n\n${cur.name}`)) {
+        await this._ws({ type: "aldi_boodschappen/list_delete", list_id: view });
+        this._viewId = null;
+        await this._loadViewed();
+      }
+    }
+  }
+
+  async _onOverlayClick(e) {
+    if (e.target.id === "overlay" || e.target.closest("[data-close]")) this._closeDialog();
+    else if (e.target.id === "d-ok") await this._submitCreate();
+    else if (e.target.id === "p-ok") await this._submitPick();
+  }
+
+  _onOverlayChange(e) {
+    if (e.target.id === "p-src") this._loadPickItems();
+    else if (e.target.id === "p-all")
+      this.shadowRoot.querySelectorAll("[data-pick]").forEach((c) => (c.checked = e.target.checked));
   }
 
   _renderStatus() {
@@ -480,6 +725,7 @@ class AldiBoodschappenPanel extends HTMLElement {
       product,
       quantity: 1,
       recurring: rec,
+      list_id: this._viewing() || undefined,
     });
     btn.textContent = "✓";
     setTimeout(() => (btn.textContent = T.add), 900);
@@ -488,7 +734,7 @@ class AldiBoodschappenPanel extends HTMLElement {
   async _addPlain() {
     const name = this._query.trim();
     if (!name) return;
-    await this._ws({ type: "aldi_boodschappen/add", name, quantity: 1, recurring: false });
+    await this._ws({ type: "aldi_boodschappen/add", name, quantity: 1, recurring: false, list_id: this._viewing() || undefined });
     this._query = "";
     this._results = [];
     this._status = "";
