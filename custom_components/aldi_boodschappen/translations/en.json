@@ -3,7 +3,7 @@
     "step": {
       "user": {
         "title": "Aldi Shopping List",
-        "description": "Choose which stores to search. Pick both to search everywhere at once and see which product is cheapest. The Algolia key is only needed for Aldi: open aldi.nl, press F12, choose Network → Fetch/XHR, search the web shop and copy the value of x-algolia-api-key from the request to algolia.net. Hoogvliet needs no settings; its prices come from the open Checkjebon project and are refreshed daily. Source for Hoogvliet: 'Checkjebon' (default) uses a daily price list, without photos or real product links. 'hoogvliet.nl web shop' gives photos, links and full names, but makes one request per search to Hoogvliet's undocumented API, without their permission. Read the warning in the README first.",
+        "description": "Choose which stores to search. Pick both to search everywhere at once and see which product is cheapest. The Algolia key is only needed for Aldi: open aldi.nl, press F12, choose Network → Fetch/XHR, search the web shop and copy the value of x-algolia-api-key from the request to algolia.net. Hoogvliet needs no settings; its prices come from the open Checkjebon project and are refreshed daily. Source for Hoogvliet: 'Checkjebon' (default) uses a daily price list, without photos or real product links. 'hoogvliet.nl web shop' gives photos, links and full names, but makes one request per search to Hoogvliet's undocumented API, without their permission. Read the warning in the README first. Picnic: enter the email and password of your Picnic account (only needed if you pick Picnic). If your account uses two-step verification, you will be asked for a code next. This is the undocumented API of the Picnic app; see the warning in the README.",
         "data": {
           "reset_enabled": "Start new week automatically",
           "reset_weekday": "Reset day",
@@ -11,7 +11,23 @@
           "app_id": "Algolia Application ID",
           "api_key": "Algolia API key (search only)",
           "stores": "Stores to search",
-          "hoogvliet_source": "Source for Hoogvliet"
+          "hoogvliet_source": "Source for Hoogvliet",
+          "picnic_username": "Picnic account email",
+          "picnic_password": "Picnic account password"
+        }
+      },
+      "picnic_channel": {
+        "title": "Picnic: verification code",
+        "description": "Picnic wants a code. Choose how to receive it.",
+        "data": {
+          "channel": "Send via"
+        }
+      },
+      "picnic_code": {
+        "title": "Picnic: verification code",
+        "description": "Enter the code you received from Picnic.",
+        "data": {
+          "code": "Code"
         }
       }
     },
@@ -22,7 +38,13 @@
       "invalid_auth": "Aldi rejected this key or Application ID. Check them and try again.",
       "cannot_connect": "Could not reach Aldi's search service. Try again later.",
       "no_store": "Choose at least one store.",
-      "api_key_required": "Aldi needs an Algolia key."
+      "api_key_required": "Aldi needs an Algolia key.",
+      "picnic_required": "Enter your Picnic email and password.",
+      "picnic_auth": "Picnic login failed. Check your email and password.",
+      "picnic_connect": "Could not reach Picnic. Try again later.",
+      "picnic_lib": "The Picnic library is not installed yet. Restart Home Assistant and try again.",
+      "picnic_send": "The code could not be sent.",
+      "picnic_code": "That code is not correct."
     }
   },
   "options": {
@@ -36,7 +58,24 @@
           "app_id": "Algolia Application ID",
           "api_key": "Algolia API key (search only)",
           "stores": "Stores to search",
-          "hoogvliet_source": "Source for Hoogvliet"
+          "hoogvliet_source": "Source for Hoogvliet",
+          "picnic_username": "Picnic account email",
+          "picnic_password": "Picnic account password"
+        },
+        "description": "Choose which stores to search. Pick both to search everywhere at once and see which product is cheapest. The Algolia key is only needed for Aldi: open aldi.nl, press F12, choose Network → Fetch/XHR, search the web shop and copy the value of x-algolia-api-key from the request to algolia.net. Hoogvliet needs no settings; its prices come from the open Checkjebon project and are refreshed daily. Source for Hoogvliet: 'Checkjebon' (default) uses a daily price list, without photos or real product links. 'hoogvliet.nl web shop' gives photos, links and full names, but makes one request per search to Hoogvliet's undocumented API, without their permission. Read the warning in the README first. Picnic: enter the email and password of your Picnic account (only needed if you pick Picnic). If your account uses two-step verification, you will be asked for a code next. This is the undocumented API of the Picnic app; see the warning in the README."
+      },
+      "picnic_channel": {
+        "title": "Picnic: verification code",
+        "description": "Picnic wants a code. Choose how to receive it.",
+        "data": {
+          "channel": "Send via"
+        }
+      },
+      "picnic_code": {
+        "title": "Picnic: verification code",
+        "description": "Enter the code you received from Picnic.",
+        "data": {
+          "code": "Code"
         }
       }
     },
@@ -44,7 +83,13 @@
       "invalid_auth": "Aldi rejected this key or Application ID. Check them and try again.",
       "cannot_connect": "Could not reach Aldi's search service. Try again later.",
       "no_store": "Choose at least one store.",
-      "api_key_required": "Aldi needs an Algolia key."
+      "api_key_required": "Aldi needs an Algolia key.",
+      "picnic_required": "Enter your Picnic email and password.",
+      "picnic_auth": "Picnic login failed. Check your email and password.",
+      "picnic_connect": "Could not reach Picnic. Try again later.",
+      "picnic_lib": "The Picnic library is not installed yet. Restart Home Assistant and try again.",
+      "picnic_send": "The code could not be sent.",
+      "picnic_code": "That code is not correct."
     }
   },
   "selector": {
@@ -62,13 +107,20 @@
     "stores": {
       "options": {
         "aldi": "Aldi",
-        "hoogvliet": "Hoogvliet"
+        "hoogvliet": "Hoogvliet",
+        "picnic": "Picnic"
       }
     },
     "hoogvliet_source": {
       "options": {
         "checkjebon": "Checkjebon price list (default)",
         "website": "hoogvliet.nl web shop (see warning in README)"
+      }
+    },
+    "picnic_channel": {
+      "options": {
+        "SMS": "SMS",
+        "EMAIL": "Email"
       }
     }
   },

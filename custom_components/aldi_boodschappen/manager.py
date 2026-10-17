@@ -61,6 +61,7 @@ class ShoppingManager:
         self._store: Store = Store(hass, STORAGE_VERSION, STORAGE_KEY)
         self.lists: list[dict[str, Any]] = []
         self.active_id = ""
+        self.prices_updated = 0.0  # tijdstip van de laatste prijsronde (0 = nog nooit)
         self._ensure_one()
 
     # ---- opslag -------------------------------------------------------- #
@@ -96,6 +97,7 @@ class ShoppingManager:
                 lst["created"] = raw.get("created", lst["created"])
                 self.lists.append(lst)
             self.active_id = data.get("active", "")
+            self.prices_updated = float(data.get("prices_updated") or 0)
         elif data.get("items"):
             # Oude opslag (één lijst): wordt de eerste lijst
             self.lists = [self._new_list(None, current_week_start(), data["items"])]
@@ -103,7 +105,16 @@ class ShoppingManager:
         self._ensure_one()
 
     def _payload(self) -> dict[str, Any]:
-        return {"version": 2, "active": self.active_id, "lists": self.lists}
+        return {
+            "version": 2,
+            "active": self.active_id,
+            "prices_updated": self.prices_updated,
+            "lists": self.lists,
+        }
+
+    def mark_prices_updated(self) -> None:
+        self.prices_updated = time.time()
+        self._changed()
 
     def _changed(self) -> None:
         self._store.async_delay_save(self._payload, 1)

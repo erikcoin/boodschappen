@@ -27,7 +27,7 @@ except ImportError:
         ClientSession=object, ClientError=Exception, ClientTimeout=lambda **k: None
     )
 
-for name in ("const", "api", "pricing", "hoogvliet", "hoogvliet_web", "search"):
+for name in ("const", "api", "pricing", "hoogvliet", "hoogvliet_web", "picnic", "search"):
     spec = importlib.util.spec_from_file_location(f"ab2.{name}", root / f"{name}.py")
     mod = importlib.util.module_from_spec(spec)
     sys.modules[f"ab2.{name}"] = mod
@@ -38,6 +38,7 @@ pricing = sys.modules["ab2.pricing"]
 hoogvliet = sys.modules["ab2.hoogvliet"]
 search = sys.modules["ab2.search"]
 web = sys.modules["ab2.hoogvliet_web"]
+picnic = sys.modules["ab2.picnic"]
 
 # ---------------------------------------------------------------- eenheden
 ps = pricing.parse_size
@@ -408,3 +409,210 @@ fallback._fetched_at = 10**12
 fallback._loaded = True
 assert [x["name"] for x in asyncio.run(fallback.search("kwark"))][:1] == ["Volle kwark"], "terugval op Checkjebon"
 print("ok: live zoeken (GraphQL, terugval) klopt")
+
+
+# ---------------------------------------------------------------- prijzen verversen
+# alleen de winkels waar het product van is, en bij Hoogvliet live + prijslijst samengevoegd
+aldi_c, hv_c = Fake(aldi_items), Fake(hv_items)
+svc = search.SearchService({"aldi": aldi_c, "hoogvliet": hv_c})
+got = asyncio.run(svc.lookup("melk", {"aldi"}))
+assert {x["code"] for x in got} == {"a1", "a2", "a3"} and hv_c.calls == [], "Hoogvliet niet gevraagd"
+assert asyncio.run(svc.lookup("melk", {"picnic"})) == [], "onbekende winkel: niets, geen fout"
+assert len(asyncio.run(svc.lookup("melk"))) == 5 and len(hv_c.calls) == 1
+
+web_item = {"name": "Pink lady Appels op schaal", "price": 3.49, "size": "4 stuks",
+            "url": "https://hoogvliet.nl/product/pink-lady-appels-op-schaal-726992000",
+            "pid": "726992000", "image": None, "available": True}
+
+
+class FakeWeb:
+    def __init__(self, items=None, error=None):
+        self.items, self.error, self.calls = items or [], error, 0
+
+    async def search(self, q):
+        self.calls += 1
+        if self.error:
+            raise self.error
+        return self.items
+
+
+hvc = hoogvliet.HoogvlietClient(session=None, web=FakeWeb([web_item]))
+hvc._products = parsed
+hvc._fetched_at = 10**12
+hvc._loaded = True
+codes = [x["code"] for x in asyncio.run(hvc.refresh_search("pink lady"))]
+assert "hoogvliet:web:726992000" in codes, "webshop-item krijgt zijn nieuwe prijs"
+down = hoogvliet.HoogvlietClient(session=None, web=FakeWeb(error=api.AldiApiError("down")))
+down._products, down._fetched_at, down._loaded = parsed, 10**12, True
+assert [x["name"] for x in asyncio.run(down.refresh_search("kwark"))][:1] == ["Volle kwark"], "valt terug op de prijslijst"
+plain = hoogvliet.HoogvlietClient(session=None)
+plain._products, plain._fetched_at, plain._loaded = parsed, 10**12, True
+assert asyncio.run(plain.refresh_search("kwark")), "zonder webshop: prijslijst"
+print("ok: prijzen verversen klopt")
+
+
+# ---------------------------------------------------------------- Picnic (met een nepbibliotheek)
+S = types.SimpleNamespace
+
+
+class PAuth(Exception): ...
+class P2FA(Exception): ...
+class P2FAError(Exception): ...
+
+
+class FakeSessionP:
+    auth_token = None
+
+
+class FakePicnic:
+    """Lijkt op python_picnic_api2.PicnicAPI, met te sturen gedrag."""
+    behaviour = {"login": "ok", "search": "ok", "verify": "ok"}
+    instances = []
+    searches = 0
+
+    def __init__(self, username=None, password=None, country_code="NL", auth_token=None):
+        self.session = FakeSessionP()
+        self.session.auth_token = auth_token
+        self.logins = 0
+        FakePicnic.instances.append(self)
+
+    def login(self, username, password):
+        self.logins += 1
+        if self.behaviour["login"] == "bad":
+            raise PAuth("fout")
+        self.session.auth_token = "token-na-login"
+        if self.behaviour["login"] == "2fa":
+            raise P2FA("code nodig")
+
+    def generate_2fa_code(self, channel):
+        self.channel = channel
+
+    def verify_2fa_code(self, code):
+        if code != "123456":
+            raise P2FAError("verkeerd")
+        self.session.auth_token = "token-na-2fa"
+
+    def search(self, term):
+        FakePicnic.searches += 1
+        if self.behaviour["search"] == "expired" and self.session.auth_token == "oud":
+            raise PAuth("verlopen")
+        return S(items=[
+            S(id="s100", name="Pink Lady appels", display_price=349, image_id="img1", unit_quantity="4 stuks"),
+            S(id="s101", name="Actietegel", display_price=None, image_id=None, unit_quantity=None),
+            S(id="s102", name="Gratis", display_price=0, image_id=None, unit_quantity="1 stuk"),
+            S(id="", name="Zonder id", display_price=100, image_id=None, unit_quantity=None),
+        ])
+
+
+sys.modules["python_picnic_api2"] = S(PicnicAPI=FakePicnic, PicnicAuthError=PAuth, Picnic2FARequired=P2FA, Picnic2FAError=P2FAError)
+
+res = picnic.parse_search(S(items=[
+    S(id="s100", name="Pink Lady appels", display_price=349, image_id="img1", unit_quantity="4 stuks"),
+    S(id="s101", name="Actietegel", display_price=None, image_id=None, unit_quantity=None),
+    S(id="s102", name="Gratis", display_price=0, image_id=None, unit_quantity="1 stuk"),
+]))
+assert len(res) == 1 and res[0]["code"] == "picnic:s100" and res[0]["price"] == 3.49 and res[0]["store"] == "picnic"
+assert res[0]["image"].endswith("/img1/medium.png") and res[0]["description"] == "4 stuks" and res[0]["url"] is None
+assert pricing.parse_size(res[0]["description"]) == (4.0, "stuk")
+assert picnic.parse_search(S(items=None)) == [] and picnic.parse_search(None) == []
+
+
+class FakeHass:
+    async def async_add_executor_job(self, fn, *args):
+        return fn(*args)
+
+
+class MemStore:
+    def __init__(self, data=None): self.data, self.saved = data, []
+    async def async_load(self): return self.data
+    async def async_save(self, d): self.saved.append(d); self.data = d
+
+
+picnic.MIN_INTERVAL = 0
+# met token: geen login nodig, resultaten onthouden
+FakePicnic.behaviour = {"login": "ok", "search": "ok", "verify": "ok"}
+FakePicnic.searches, FakePicnic.instances = 0, []
+store = MemStore()
+pc = picnic.PicnicClient(FakeHass(), "a@b.nl", "geheim", "tok", store)
+asyncio.run(pc.async_load())
+out = asyncio.run(pc.search("appels"))
+assert [x["code"] for x in out] == ["picnic:s100"] and FakePicnic.instances[0].logins == 0
+asyncio.run(pc.search("Appels"))
+assert FakePicnic.searches == 1, "tweede keer uit het geheugen"
+assert store.saved == [], "token niet veranderd: niets opgeslagen"
+
+# verlopen token: één keer opnieuw inloggen, nieuw token bewaard
+FakePicnic.behaviour = {"login": "ok", "search": "expired", "verify": "ok"}
+FakePicnic.searches, FakePicnic.instances = 0, []
+store = MemStore()
+pc = picnic.PicnicClient(FakeHass(), "a@b.nl", "geheim", "oud", store)
+assert asyncio.run(pc.search("melk"))[0]["code"] == "picnic:s100"
+assert pc._token == "token-na-login" and store.saved[-1] == {"seed": "oud", "token": "token-na-login"}
+# opnieuw laden: het bewaarde token telt alleen voor dezelfde instellingen
+again = picnic.PicnicClient(FakeHass(), "a@b.nl", "geheim", "oud", store)
+asyncio.run(again.async_load()); assert again._token == "token-na-login"
+other = picnic.PicnicClient(FakeHass(), "a@b.nl", "geheim", "nieuw-uit-instellingen", store)
+asyncio.run(other.async_load()); assert other._token == "nieuw-uit-instellingen"
+
+# fouten: wachtwoord fout, 2FA nodig, geen gegevens, onverwacht
+def expect(client, exc, query="x1"):
+    try:
+        asyncio.run(client.search(query))
+    except exc as err:
+        return err
+    raise AssertionError(f"verwachtte {exc}")
+
+FakePicnic.behaviour = {"login": "bad", "search": "expired", "verify": "ok"}
+expect(picnic.PicnicClient(FakeHass(), "a@b.nl", "fout", "oud"), picnic.PicnicLoginError)
+FakePicnic.behaviour = {"login": "2fa", "search": "expired", "verify": "ok"}
+assert "verificatiecode" in str(expect(picnic.PicnicClient(FakeHass(), "a@b.nl", "x", "oud"), picnic.PicnicLoginError))
+expect(picnic.PicnicClient(FakeHass(), "", "", None), picnic.PicnicLoginError)
+assert isinstance(picnic.PicnicLoginError("x"), api.AldiApiError), "wordt als waarschuwing getoond"
+
+# inloggen vanuit de config flow, met en zonder 2FA
+FakePicnic.behaviour = {"login": "ok", "search": "ok", "verify": "ok"}
+setup = picnic.PicnicSetup(FakeHass())
+assert asyncio.run(setup.login("a@b.nl", "pw")) == "token-na-login"
+FakePicnic.behaviour = {"login": "2fa", "search": "ok", "verify": "ok"}
+setup = picnic.PicnicSetup(FakeHass())
+try:
+    asyncio.run(setup.login("a@b.nl", "pw"))
+except picnic.PicnicNeeds2FA:
+    pass
+else:
+    raise AssertionError("2FA verwacht")
+asyncio.run(setup.send_code("EMAIL"))
+assert setup._api.channel == "EMAIL"
+try:
+    asyncio.run(setup.verify("000000"))
+except picnic.PicnicLoginError:
+    pass
+else:
+    raise AssertionError("foute code")
+assert asyncio.run(setup.verify("123456")) == "token-na-2fa"
+FakePicnic.behaviour = {"login": "bad", "search": "ok", "verify": "ok"}
+try:
+    asyncio.run(picnic.PicnicSetup(FakeHass()).login("a@b.nl", "fout"))
+except picnic.PicnicLoginError as err:
+    assert not isinstance(err, picnic.PicnicNeeds2FA)
+
+# zonder bibliotheek: duidelijke fout
+del sys.modules["python_picnic_api2"]
+import builtins
+real_import = builtins.__import__
+def no_lib(name, *a, **k):
+    if name.startswith("python_picnic_api2"):
+        raise ImportError(name)
+    return real_import(name, *a, **k)
+builtins.__import__ = no_lib
+try:
+    expect(picnic.PicnicClient(FakeHass(), "a", "b", "tok"), picnic.PicnicLibraryError)
+finally:
+    builtins.__import__ = real_import
+
+# samen met de andere winkels
+class PicnicFake(Fake): ...
+svc = search.SearchService({"aldi": Fake(aldi_items), "picnic": PicnicFake([mk("picnic:s1", 1.0, "1 kg", "picnic")])})
+merged, warns = asyncio.run(svc.search("x"))
+assert {x["store"] for x in merged} == {"aldi", "picnic"} and warns == []
+print("ok: Picnic (zoeken, token, 2FA, fouten) klopt")

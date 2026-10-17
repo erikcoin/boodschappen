@@ -20,8 +20,17 @@ USER_AGENT = "HomeAssistant-AldiBoodschappen/0.3 (persoonlijk gebruik)"
 
 STORE_ALDI = "aldi"
 STORE_HOOGVLIET = "hoogvliet"
-STORES = [STORE_ALDI, STORE_HOOGVLIET]
-STORE_LABELS = {STORE_ALDI: "Aldi", STORE_HOOGVLIET: "Hoogvliet"}
+STORE_PICNIC = "picnic"
+STORES = [STORE_ALDI, STORE_HOOGVLIET, STORE_PICNIC]
+STORE_LABELS = {STORE_ALDI: "Aldi", STORE_HOOGVLIET: "Hoogvliet", STORE_PICNIC: "Picnic"}
+
+# Picnic: geen website, alleen de app. We gebruiken dezelfde (niet-gedocumenteerde) API als de
+# app, via de bibliotheek python-picnic-api2 die ook de Picnic-integratie van Home Assistant gebruikt.
+CONF_PICNIC_USERNAME = "picnic_username"
+CONF_PICNIC_PASSWORD = "picnic_password"
+CONF_PICNIC_TOKEN = "picnic_token"
+PICNIC_COUNTRY = "NL"
+PICNIC_STORAGE_KEY = f"{DOMAIN}.picnic"
 DEFAULT_STORES = [STORE_ALDI]
 
 # Hoogvliet: hoogvliet.nl verbiedt in robots.txt het zoekpad en de Intershop-API

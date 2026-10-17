@@ -29,9 +29,15 @@ class SearchService:
         return list(self._clients)
 
     async def _search_each(
-        self, query: str, limit: int, background: bool = False
+        self,
+        query: str,
+        limit: int,
+        background: bool = False,
+        only: set[str] | None = None,
     ) -> tuple[dict[str, list[dict[str, Any]]], list[str]]:
-        names = list(self._clients)
+        names = [n for n in self._clients if only is None or n in only]
+        if not names:
+            return {}, []
         outcomes = await asyncio.gather(
             *(self._search_one(n, query, limit, background) for n in names),
             return_exceptions=True,
@@ -56,10 +62,12 @@ class SearchService:
 
     async def _search_one(self, name: str, query: str, limit: int, background: bool):
         client = self._clients[name]
-        # Op de achtergrond (prijzen verversen) geen live verzoeken naar winkelsites die dat
-        # apart aanbieden: die gebruiken dan hun lokale gegevens.
-        local = getattr(client, "lookup", None) if background else None
-        return await (local or client.search)(query, limit)
+        # Bij het verversen van prijzen: de winkel kan daar een eigen werkwijze voor hebben
+        # (Hoogvliet: live als gekozen, anders de lokale prijslijst). Anders gewoon zoeken.
+        refresh = None
+        if background:
+            refresh = getattr(client, "refresh_search", None) or getattr(client, "lookup", None)
+        return await (refresh or client.search)(query, limit)
 
     async def search(
         self, query: str, limit: int = SEARCH_LIMIT
@@ -79,9 +87,9 @@ class SearchService:
         mark_cheapest(merged)
         return merged, warnings
 
-    async def lookup(self, query: str) -> list[dict[str, Any]]:
-        """Alle resultaten van alle winkels, zonder afkappen (om prijzen bij te werken)."""
-        found, _ = await self._search_each(query, SEARCH_LIMIT, background=True)
+    async def lookup(self, query: str, stores: set[str] | None = None) -> list[dict[str, Any]]:
+        """Alle resultaten (van de genoemde winkels), zonder afkappen, om prijzen bij te werken."""
+        found, _ = await self._search_each(query, SEARCH_LIMIT, background=True, only=stores)
         return [product for products in found.values() for product in products]
 
     async def enrich(self, product: dict[str, Any]) -> dict[str, Any]:

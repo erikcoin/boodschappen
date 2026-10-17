@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
+import time
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
@@ -25,6 +27,9 @@ from .const import (
     CONF_API_KEY,
     CONF_APP_ID,
     CONF_HOOGVLIET_SOURCE,
+    CONF_PICNIC_PASSWORD,
+    CONF_PICNIC_TOKEN,
+    CONF_PICNIC_USERNAME,
     CONF_RESET_ENABLED,
     CONF_RESET_HOUR,
     CONF_RESET_WEEKDAY,
@@ -37,6 +42,7 @@ from .const import (
     DOMAIN,
     HOOGVLIET_SOURCE_WEBSITE,
     HOOGVLIET_STORAGE_KEY,
+    PICNIC_STORAGE_KEY,
     PANEL_ICON,
     PANEL_TITLE,
     PANEL_URL,
@@ -45,11 +51,13 @@ from .const import (
     STORAGE_VERSION,
     STORE_ALDI,
     STORE_HOOGVLIET,
+    STORE_PICNIC,
     WEEKDAYS,
 )
 from .hoogvliet_web import HoogvlietWebSearch
 from .hoogvliet import HoogvlietClient, clean_name, image_url, product_id
 from .manager import ShoppingManager
+from .picnic import PicnicClient
 from .search import SearchService
 
 _LOGGER = logging.getLogger(__name__)
@@ -96,6 +104,10 @@ def _runtime(hass: HomeAssistant) -> dict[str, Any] | None:
     return hass.data.get(DOMAIN, {}).get("runtime")
 
 
+MAX_REFRESH_PRODUCTS = 150
+PRICE_REFRESH_INTERVAL = timedelta(hours=24)
+
+
 async def async_refresh_prices(hass: HomeAssistant) -> int:
     """Zoek de producten op de lijst opnieuw op en werk hun prijs bij."""
     runtime = _runtime(hass)
@@ -106,21 +118,36 @@ async def async_refresh_prices(hass: HomeAssistant) -> int:
 
     live = manager.live_items()  # huidige en komende lijsten; de geschiedenis houdt zijn prijzen
     codes = {i["code"] for i in live if i.get("code")}
-    names = list(dict.fromkeys(i["name"] for i in live if i.get("code")))
+    # Per uniek product één zoekopdracht, en alleen bij de winkel(s) waar het van is
+    stores_by_name: dict[str, set[str]] = {}
+    for item in live:
+        if item.get("code"):
+            stores_by_name.setdefault(item["name"], set()).add(item.get("store") or STORE_ALDI)
     updates: dict[str, dict[str, Any]] = {}
-    for name in names[:40]:  # begrenzen: één zoekopdracht per uniek product
+    failed = 0
+    for name, stores in list(stores_by_name.items())[:MAX_REFRESH_PRODUCTS]:
         try:
-            results = await search.lookup(name)
+            results = await search.lookup(name, stores)
         except AldiApiError as err:
-            _LOGGER.warning("Prijzen bijwerken afgebroken: %s", err)
-            break
+            # Eén product dat niet lukt mag de rest niet tegenhouden; bij een storing in alle
+            # winkels (meerdere achter elkaar) stoppen we.
+            failed += 1
+            _LOGGER.warning("Prijs van %r bijwerken mislukt: %s", name, err)
+            if failed >= 3:
+                _LOGGER.warning("Prijzen bijwerken afgebroken na meerdere fouten")
+                break
+            continue
         for product in results:
             if product["code"] in codes:
                 updates[product["code"]] = {
                     "price": product["price"],
                     "price_valid_until": product["price_valid_until"],
                 }
-    return manager.update_prices(updates)
+    changed = manager.update_prices(updates)
+    if failed < 3:
+        manager.mark_prices_updated()
+    _LOGGER.debug("Prijzen bijgewerkt: %d wijzigingen, %d producten opgezocht", changed, len(stores_by_name))
+    return changed
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
@@ -144,6 +171,16 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             options.get(CONF_APP_ID, DEFAULT_APP_ID),
             options.get(CONF_API_KEY, ""),
         )
+    if STORE_PICNIC in stores:
+        picnic = PicnicClient(
+            hass,
+            options.get(CONF_PICNIC_USERNAME, ""),
+            options.get(CONF_PICNIC_PASSWORD, ""),
+            options.get(CONF_PICNIC_TOKEN),
+            Store(hass, STORAGE_VERSION, PICNIC_STORAGE_KEY),
+        )
+        await picnic.async_load()
+        clients[STORE_PICNIC] = picnic
     if STORE_HOOGVLIET in stores:
         live = options.get(CONF_HOOGVLIET_SOURCE) == HOOGVLIET_SOURCE_WEBSITE
         hoogvliet = HoogvlietClient(
@@ -188,17 +225,28 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             hass, hoogvliet.async_refresh_safe(), "aldi_boodschappen hoogvliet"
         )
 
-        async def _daily_hoogvliet(now: datetime) -> None:
-            await hoogvliet.async_refresh_safe()
-
-        entry.async_on_unload(
-            async_track_time_interval(hass, _daily_hoogvliet, timedelta(hours=24))
-        )
 
     hass.data[DOMAIN]["runtime"] = {
         "manager": manager,
         "search": SearchService(clients),
     }
+
+    # Prijzen op de lijsten actueel houden: elke 24 uur, en bij het opstarten als de
+    # laatste ronde langer dan 20 uur geleden is (bijv. omdat Home Assistant uit stond).
+    hoogvliet_client = clients.get(STORE_HOOGVLIET)
+
+    async def _price_round(now: datetime | None = None) -> None:
+        if hoogvliet_client is not None:
+            await hoogvliet_client.async_refresh_safe()  # eerst de nieuwste prijslijst
+        await async_refresh_prices(hass)
+
+    async def _startup_round() -> None:
+        await asyncio.sleep(90)  # Home Assistant eerst rustig laten opstarten
+        if time.time() - manager.prices_updated > 20 * 3600:
+            await _price_round()
+
+    entry.async_on_unload(async_track_time_interval(hass, _price_round, PRICE_REFRESH_INTERVAL))
+    entry.async_create_background_task(hass, _startup_round(), "aldi_boodschappen prijzen")
 
     # Paneel in de zijbalk
     await panel_custom.async_register_panel(
@@ -306,7 +354,12 @@ async def ws_search(hass: HomeAssistant, connection, msg) -> None:
 
 
 def _state(manager: ShoppingManager) -> dict[str, Any]:
-    return {"lists": manager.summaries(), "active": manager.active_id, "items": manager.items}
+    return {
+        "lists": manager.summaries(),
+        "active": manager.active_id,
+        "items": manager.items,
+        "prices_updated": manager.prices_updated,
+    }
 
 
 @websocket_api.websocket_command(

@@ -1,6 +1,6 @@
 # Aldi Boodschappen voor Home Assistant
 
-Boodschappenlijst met producten van **Aldi** en/of **Hoogvliet**, met prijzen. Kies in de instellingen in welke winkels je zoekt; kies je beide, dan zie je welk product het goedkoopst is.
+Boodschappenlijst met producten van **Aldi**, **Hoogvliet** en/of **Picnic**, met prijzen. Kies in de instellingen in welke winkels je zoekt; kies je beide, dan zie je welk product het goedkoopst is.
 
 - Typ een zoekterm (bijv. *pink lady*) en kies uit alle gevonden producten, met foto, hoeveelheid en prijs.
 - **Prijzen vergelijken**: zoeken gaat over alle gekozen winkels tegelijk. Elk resultaat toont de prijs per kg, liter of stuk, je kunt sorteren op laagste prijs, en het goedkoopste product per eenheid krijgt een label.
@@ -104,3 +104,20 @@ In de instellingen kies je bij **Bron voor Hoogvliet** tussen:
 > Mislukt een verzoek (of verandert Hoogvliet de API), dan valt de integratie terug op de Checkjebon-prijslijst en staat er een regel in het Home Assistant-log.
 >
 > Prijzen van producten die je via de webshop hebt toegevoegd worden niet automatisch bijgewerkt (alleen Aldi en Checkjebon-producten).
+
+## Picnic (optioneel) — lees dit eerst
+
+Picnic heeft geen webwinkel, alleen een app. In de instellingen kun je **Picnic** als winkel kiezen en het e-mailadres en wachtwoord van je Picnic-account invullen. De integratie zoekt dan in het assortiment via dezelfde API als de app, met de bibliotheek [python-picnic-api2](https://pypi.org/project/python-picnic-api2/) die ook de Picnic-integratie van Home Assistant gebruikt. Prijzen en hoeveelheden komen ook mee in de vergelijking met andere winkels.
+
+> **Waarschuwing.** Dit is een niet-gedocumenteerde API van Picnic, gebruikt zonder hun toestemming. Picnic kan hem zonder aankondiging veranderen, het verkeer blokkeren of een account beperken. Gebruik het alleen voor persoonlijk gebruik, en liefst met een account waar je niet bang voor bent. Je e-mailadres en wachtwoord worden opgeslagen in de configuratie van Home Assistant (zoals de Aldi-sleutel), en na het inloggen ook een toegangssleutel.
+>
+> Heeft je account **tweestapsverificatie**, dan kies je tijdens het instellen hoe je de code ontvangt (SMS of e-mail) en vul je die in. Verloopt de toegangssleutel later en is er opnieuw een code nodig, dan meldt de integratie dat bij het zoeken: open dan de instellingen en sla ze opnieuw op.
+>
+> Zuinig gebruik: één verzoek per zoekopdracht, nooit sneller dan één per 3 seconden, resultaten 10 minuten onthouden. Picnic-producten hebben geen link naar een webpagina.
+>
+> Bij het installeren haalt Home Assistant de bibliotheek `python-picnic-api2` op. **Niet getest tegen de echte Picnic-API**; meld problemen met de regel uit het Home Assistant-log.
+
+## Prijzen bijwerken
+
+De prijzen van de producten op je huidige en komende lijsten worden **elke 24 uur automatisch** opnieuw opgezocht, en bij het opstarten van Home Assistant als de laatste keer meer dan 20 uur geleden is. Onder het totaal staat wanneer dat voor het laatst gebeurde. Je kunt het ook zelf starten met **Prijzen bijwerken**. Per product wordt alleen gezocht bij zijn eigen winkel. Bij Hoogvliet via de webshop komt de nieuwe prijs live uit de webshop; bij Hoogvliet via Checkjebon uit de dagelijkse prijslijst. Eerdere lijsten (geschiedenis) behouden de prijzen van die week.
+

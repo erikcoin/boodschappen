@@ -213,6 +213,11 @@ again = mm.ShoppingManager(hass=None)
 again._store = LoadStore(saved)
 asyncio.run(again.async_load())
 assert again.active_id == old.active_id and again.items == old.items
+assert saved["prices_updated"] == 0
+stamped = mm.ShoppingManager(hass=None)
+stamped._store = LoadStore({**saved, "prices_updated": 1760000000.0})
+asyncio.run(stamped.async_load())
+assert stamped.prices_updated == 1760000000.0 and stamped._payload()["prices_updated"] == 1760000000.0
 empty = mm.ShoppingManager(hass=None)
 empty._store = LoadStore(None)
 asyncio.run(empty.async_load())

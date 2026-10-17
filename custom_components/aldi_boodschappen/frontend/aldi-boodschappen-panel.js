@@ -54,6 +54,8 @@ const T = {
   noPrice: "zonder prijs",
   stale: "prijs mogelijk verouderd",
   refresh: "Prijzen bijwerken",
+  pricesAt: "Prijzen bijgewerkt",
+  never: "nog niet",
   refreshing: "Bezig…",
   newWeekConfirm:
     "Naar de volgende week? De huidige lijst blijft bewaard. Een lijst die je al klaarzette wordt de huidige; anders ontstaat er een nieuwe met je terugkerende producten.",
@@ -96,6 +98,15 @@ function groupList(items, mode) {
   return [...groups.entries()]
     .sort(([a], [b]) => (a === T.other) - (b === T.other) || a.localeCompare(b, "nl"))
     .map(([title, list]) => ({ title, items: open(list) }));
+}
+
+/* "17 okt 05:30", of "nog niet" als er nog nooit is bijgewerkt. */
+function pricesStamp(sec) {
+  if (!sec) return T.never;
+  const d = new Date(sec * 1000);
+  const mon = ["jan", "feb", "mrt", "apr", "mei", "jun", "jul", "aug", "sep", "okt", "nov", "dec"][d.getMonth()];
+  const hh = String(d.getHours()).padStart(2, "0"), mm = String(d.getMinutes()).padStart(2, "0");
+  return `${d.getDate()} ${mon} ${hh}:${mm}`;
 }
 
 /* Link van een item; zonder eigen link een zoekpagina van de winkel, zodat er altijd iets te klikken is. */
@@ -154,6 +165,7 @@ class AldiBoodschappenPanel extends HTMLElement {
     this._hass = null;
     this._items = [];
     this._lists = [];
+    this._pricesUpdated = 0;
     this._activeId = "";
     this._viewId = null; // null = de huidige lijst volgen
     this._results = [];
@@ -210,6 +222,7 @@ class AldiBoodschappenPanel extends HTMLElement {
       (msg) => {
         this._lists = msg.lists || [];
         this._activeId = msg.active || "";
+        this._pricesUpdated = msg.prices_updated || 0;
         if (this._viewId && !this._lists.some((l) => l.id === this._viewId)) this._viewId = null;
         this._renderListBar();
         if (this._viewing() === this._activeId) {
@@ -635,6 +648,7 @@ class AldiBoodschappenPanel extends HTMLElement {
       ${boughtSum > 0 ? `<span class="lbl">(+ ${money(boughtSum)} ${T.alreadyBought})</span>` : ""}
       <button id="refresh">${T.refresh}</button>
       ${stores.length > 1 ? `<span class="note">${T.perStore}: ${stores.map(([n, v]) => `${escapeHtml(n)} ${money(v)}`).join(" · ")}</span>` : ""}
+      <span class="note">${T.pricesAt}: ${pricesStamp(this._pricesUpdated)}</span>
       ${noPrice ? `<span class="note">${noPrice} ${noPrice === 1 ? "product" : "producten"} ${T.noPrice}, niet meegeteld</span>` : ""}
       ${stale ? `<span class="note warn">${stale} ${stale === 1 ? "prijs" : "prijzen"} mogelijk verouderd, gebruik "${T.refresh}"</span>` : ""}`;
   }

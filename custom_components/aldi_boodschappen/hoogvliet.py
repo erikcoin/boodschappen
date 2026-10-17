@@ -365,6 +365,25 @@ class HoogvlietClient:
                 return [self._public_web(p) for p in found[:limit]]
         return await self.lookup(query, limit)
 
+    async def refresh_search(self, query: str, limit: int = SEARCH_LIMIT) -> list[dict[str, Any]]:
+        """Resultaten om prijzen bij te werken: live als de webshop de bron is, plus de prijslijst.
+
+        Producten die via de webshop zijn toegevoegd hebben een andere code dan die uit de
+        prijslijst, dus beide bronnen worden samengevoegd. Mislukt de ene, dan telt de andere.
+        """
+        results: list[dict[str, Any]] = []
+        if self._web is not None:
+            try:
+                results += [self._public_web(p) for p in (await self._web.search(query))[:limit]]
+            except AldiApiError as err:
+                _LOGGER.warning("Prijzen verversen via hoogvliet.nl mislukt: %s", err)
+        try:
+            results += await self.lookup(query, limit)
+        except AldiApiError:
+            if not results:
+                raise
+        return results
+
     async def lookup(self, query: str, limit: int = SEARCH_LIMIT) -> list[dict[str, Any]]:
         """Zoeken in de lokale Checkjebon-catalogus (geen verzoek naar Hoogvliet)."""
         terms = normalize(query).split()

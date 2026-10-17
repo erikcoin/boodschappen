@@ -12,10 +12,14 @@ from homeassistant.helpers import selector
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
 from .api import AldiApiError, AldiAuthError, AldiClient
+from .picnic import PicnicLibraryError, PicnicLoginError, PicnicNeeds2FA, PicnicSetup
 from .const import (
     CONF_API_KEY,
     CONF_HOOGVLIET_SOURCE,
     CONF_APP_ID,
+    CONF_PICNIC_PASSWORD,
+    CONF_PICNIC_TOKEN,
+    CONF_PICNIC_USERNAME,
     CONF_RESET_ENABLED,
     CONF_RESET_HOUR,
     CONF_RESET_WEEKDAY,
@@ -29,6 +33,7 @@ from .const import (
     DEFAULT_STORES,
     DOMAIN,
     STORE_ALDI,
+    STORE_PICNIC,
     STORES,
     WEEKDAYS,
 )
@@ -57,6 +62,14 @@ def _schema(defaults: dict[str, Any]) -> vol.Schema:
             ): selector.TextSelector(),
             vol.Optional(
                 CONF_API_KEY, default=defaults.get(CONF_API_KEY, "")
+            ): selector.TextSelector(
+                selector.TextSelectorConfig(type=selector.TextSelectorType.PASSWORD)
+            ),
+            vol.Optional(
+                CONF_PICNIC_USERNAME, default=defaults.get(CONF_PICNIC_USERNAME, "")
+            ): selector.TextSelector(),
+            vol.Optional(
+                CONF_PICNIC_PASSWORD, default=defaults.get(CONF_PICNIC_PASSWORD, "")
             ): selector.TextSelector(
                 selector.TextSelectorConfig(type=selector.TextSelectorType.PASSWORD)
             ),
@@ -110,7 +123,97 @@ async def _validate(hass, user_input: dict[str, Any]) -> dict[str, str]:
     return {}
 
 
-class AldiBoodschappenConfigFlow(ConfigFlow, domain=DOMAIN):
+class _PicnicSteps:
+    """Inloggen bij Picnic, eventueel met een verificatiecode. Gedeeld door config flow en opties."""
+
+    _picnic: PicnicSetup | None = None
+    _data: dict[str, Any]
+
+    def _finish(self, data: dict[str, Any]) -> ConfigFlowResult:  # overschreven per flow
+        raise NotImplementedError
+
+    async def _picnic_gate(
+        self, data: dict[str, Any], previous: dict[str, Any]
+    ) -> tuple[ConfigFlowResult | None, dict[str, str]]:
+        """(resultaat, fouten): een resultaat betekent 'ga door met de 2FA-stap'; (None, {}) is klaar."""
+        if STORE_PICNIC not in (data.get(CONF_STORES) or []):
+            data.pop(CONF_PICNIC_TOKEN, None)
+            return None, {}
+        username = str(data.get(CONF_PICNIC_USERNAME, "")).strip()
+        password = str(data.get(CONF_PICNIC_PASSWORD, ""))
+        if not username or not password:
+            return None, {CONF_PICNIC_USERNAME: "picnic_required"}
+        data[CONF_PICNIC_USERNAME] = username
+
+        same = (
+            previous.get(CONF_PICNIC_TOKEN)
+            and previous.get(CONF_PICNIC_USERNAME) == username
+            and previous.get(CONF_PICNIC_PASSWORD) == password
+        )
+        if same:
+            data[CONF_PICNIC_TOKEN] = previous[CONF_PICNIC_TOKEN]
+            return None, {}
+
+        self._picnic = PicnicSetup(self.hass)
+        try:
+            data[CONF_PICNIC_TOKEN] = await self._picnic.login(username, password)
+        except PicnicNeeds2FA:
+            self._data = data
+            return await self.async_step_picnic_channel(), {}
+        except PicnicLibraryError:
+            return None, {"base": "picnic_lib"}
+        except PicnicLoginError:
+            return None, {"base": "picnic_auth"}
+        except AldiApiError:
+            return None, {"base": "picnic_connect"}
+        return None, {}
+
+    async def async_step_picnic_channel(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        errors: dict[str, str] = {}
+        if user_input is not None:
+            try:
+                await self._picnic.send_code(user_input["channel"])
+            except AldiApiError:
+                errors["base"] = "picnic_send"
+            else:
+                return await self.async_step_picnic_code()
+        return self.async_show_form(
+            step_id="picnic_channel",
+            data_schema=vol.Schema(
+                {
+                    vol.Required("channel", default="SMS"): selector.SelectSelector(
+                        selector.SelectSelectorConfig(
+                            options=["SMS", "EMAIL"], translation_key="picnic_channel"
+                        )
+                    )
+                }
+            ),
+            errors=errors,
+        )
+
+    async def async_step_picnic_code(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        errors: dict[str, str] = {}
+        if user_input is not None:
+            try:
+                self._data[CONF_PICNIC_TOKEN] = await self._picnic.verify(user_input["code"])
+            except PicnicLoginError:
+                errors["base"] = "picnic_code"
+            except AldiApiError:
+                errors["base"] = "picnic_connect"
+            else:
+                return self._finish(self._data)
+        return self.async_show_form(
+            step_id="picnic_code",
+            data_schema=vol.Schema({vol.Required("code"): selector.TextSelector()}),
+            errors=errors,
+        )
+
+
+class AldiBoodschappenConfigFlow(_PicnicSteps, ConfigFlow, domain=DOMAIN):
     VERSION = 1
 
     async def async_step_user(
@@ -124,9 +227,11 @@ class AldiBoodschappenConfigFlow(ConfigFlow, domain=DOMAIN):
             user_input[CONF_RESET_HOUR] = int(user_input[CONF_RESET_HOUR])
             errors = await _validate(self.hass, user_input)
             if not errors:
-                return self.async_create_entry(
-                    title="Aldi Boodschappen", data=user_input
-                )
+                follow_up, errors = await self._picnic_gate(user_input, {})
+                if follow_up is not None:
+                    return follow_up
+                if not errors:
+                    return self._finish(user_input)
 
         return self.async_show_form(
             step_id="user",
@@ -134,13 +239,19 @@ class AldiBoodschappenConfigFlow(ConfigFlow, domain=DOMAIN):
             errors=errors,
         )
 
+    def _finish(self, data: dict[str, Any]) -> ConfigFlowResult:
+        return self.async_create_entry(title="Aldi Boodschappen", data=data)
+
     @staticmethod
     @callback
     def async_get_options_flow(config_entry) -> OptionsFlow:
         return AldiBoodschappenOptionsFlow()
 
 
-class AldiBoodschappenOptionsFlow(OptionsFlow):
+class AldiBoodschappenOptionsFlow(_PicnicSteps, OptionsFlow):
+    def _finish(self, data: dict[str, Any]) -> ConfigFlowResult:
+        return self.async_create_entry(data=data)
+
     async def async_step_init(
         self, user_input: dict[str, Any] | None = None
     ) -> ConfigFlowResult:
@@ -149,7 +260,12 @@ class AldiBoodschappenOptionsFlow(OptionsFlow):
             user_input[CONF_RESET_HOUR] = int(user_input[CONF_RESET_HOUR])
             errors = await _validate(self.hass, user_input)
             if not errors:
-                return self.async_create_entry(data=user_input)
+                previous = {**self.config_entry.data, **self.config_entry.options}
+                follow_up, errors = await self._picnic_gate(user_input, previous)
+                if follow_up is not None:
+                    return follow_up
+                if not errors:
+                    return self._finish(user_input)
 
         current = user_input or {**self.config_entry.data, **self.config_entry.options}
         return self.async_show_form(
