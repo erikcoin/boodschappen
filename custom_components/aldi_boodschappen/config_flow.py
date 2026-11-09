@@ -16,6 +16,7 @@ from .picnic import PicnicLibraryError, PicnicLoginError, PicnicNeeds2FA, Picnic
 from .const import (
     CONF_API_KEY,
     CONF_HOOGVLIET_SOURCE,
+    CONF_LIDL_SOURCE,
     CONF_APP_ID,
     CONF_PICNIC_PASSWORD,
     CONF_PICNIC_TOKEN,
@@ -26,6 +27,8 @@ from .const import (
     CONF_STORES,
     DEFAULT_APP_ID,
     DEFAULT_HOOGVLIET_SOURCE,
+    DEFAULT_LIDL_SOURCE,
+    LIDL_SOURCES,
     HOOGVLIET_SOURCES,
     DEFAULT_RESET_ENABLED,
     DEFAULT_RESET_HOUR,
@@ -55,6 +58,14 @@ def _schema(defaults: dict[str, Any]) -> vol.Schema:
             ): selector.SelectSelector(
                 selector.SelectSelectorConfig(
                     options=HOOGVLIET_SOURCES, translation_key="hoogvliet_source"
+                )
+            ),
+            vol.Required(
+                CONF_LIDL_SOURCE,
+                default=defaults.get(CONF_LIDL_SOURCE, DEFAULT_LIDL_SOURCE),
+            ): selector.SelectSelector(
+                selector.SelectSelectorConfig(
+                    options=LIDL_SOURCES, translation_key="lidl_source"
                 )
             ),
             vol.Required(

@@ -27,6 +27,7 @@ from .const import (
     CONF_API_KEY,
     CONF_APP_ID,
     CONF_HOOGVLIET_SOURCE,
+    CONF_LIDL_SOURCE,
     CONF_PICNIC_PASSWORD,
     CONF_PICNIC_TOKEN,
     CONF_PICNIC_USERNAME,
@@ -41,7 +42,9 @@ from .const import (
     DEFAULT_STORES,
     DOMAIN,
     HOOGVLIET_SOURCE_WEBSITE,
+    LIDL_SOURCE_WEBSITE,
     HOOGVLIET_STORAGE_KEY,
+    LIDL_STORAGE_KEY,
     PICNIC_STORAGE_KEY,
     PANEL_ICON,
     PANEL_TITLE,
@@ -51,11 +54,14 @@ from .const import (
     STORAGE_VERSION,
     STORE_ALDI,
     STORE_HOOGVLIET,
+    STORE_LIDL,
     STORE_PICNIC,
     WEEKDAYS,
 )
 from .hoogvliet_web import HoogvlietWebSearch
 from .hoogvliet import HoogvlietClient, clean_name, image_url, product_id
+from .lidl import LidlClient
+from .lidl_web import LidlWebSearch
 from .manager import ShoppingManager
 from .picnic import PicnicClient
 from .search import SearchService
@@ -171,6 +177,16 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             options.get(CONF_APP_ID, DEFAULT_APP_ID),
             options.get(CONF_API_KEY, ""),
         )
+    if STORE_LIDL in stores:
+        lidl_live = options.get(CONF_LIDL_SOURCE) == LIDL_SOURCE_WEBSITE
+        lidl = LidlClient(
+            session,
+            Store(hass, STORAGE_VERSION, LIDL_STORAGE_KEY),
+            web=LidlWebSearch(session) if lidl_live else None,
+        )
+        clients[STORE_LIDL] = lidl
+        # Zelfde werkwijze als Hoogvliet: de prijslijst op de achtergrond ophalen
+        entry.async_create_background_task(hass, lidl.async_refresh_safe(), "aldi_boodschappen lidl")
     if STORE_PICNIC in stores:
         picnic = PicnicClient(
             hass,
@@ -233,11 +249,13 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     # Prijzen op de lijsten actueel houden: elke 24 uur, en bij het opstarten als de
     # laatste ronde langer dan 20 uur geleden is (bijv. omdat Home Assistant uit stond).
-    hoogvliet_client = clients.get(STORE_HOOGVLIET)
+    catalogs = [c for c in (clients.get(STORE_HOOGVLIET), clients.get(STORE_LIDL)) if c is not None]
 
     async def _price_round(now: datetime | None = None) -> None:
-        if hoogvliet_client is not None:
-            await hoogvliet_client.async_refresh_safe()  # eerst de nieuwste prijslijst
+        for catalog in catalogs:
+            # force: de lijst is net geen 24 uur oud als deze ronde start, en zou anders pas
+            # de volgende dag worden ververst
+            await catalog.async_refresh_safe(force=True)
         await async_refresh_prices(hass)
 
     async def _startup_round() -> None:

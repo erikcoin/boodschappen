@@ -18,7 +18,7 @@ from typing import Any
 import aiohttp
 
 from .const import HOOGVLIET_API_URL, SEARCH_CACHE_SECONDS, USER_AGENT
-from .hoogvliet import IMAGE_URL, HoogvlietError, product_id
+from .hoogvliet import IMAGE_URL, HoogvlietError, product_id, read_limited
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -166,7 +166,7 @@ class HoogvlietWebSearch:
             ) as resp:
                 if resp.status != 200:
                     raise HoogvlietError(f"Hoogvliet gaf status {resp.status}")
-                body = await resp.content.read(MAX_BYTES)
+                body = await read_limited(resp.content, MAX_BYTES)
         except (aiohttp.ClientError, TimeoutError) as err:
             raise HoogvlietError(f"Hoogvliet niet bereikbaar: {err}") from err
         try:

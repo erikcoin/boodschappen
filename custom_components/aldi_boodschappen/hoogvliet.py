@@ -253,8 +253,33 @@ def parse_checkjebon(raw: bytes | str) -> list[dict[str, Any]]:
     return products
 
 
+async def read_limited(content: Any, limit: int) -> bytes:
+    """Lees een antwoord helemaal uit (tot `limit` bytes).
+
+    `content.read(n)` geeft alleen terug wat op dat moment binnen is, en dus bij grotere
+    antwoorden een afgebroken stuk; daarom in stukken lezen tot het einde.
+    """
+    buffer = bytearray()
+    async for chunk in content.iter_chunked(1 << 16):
+        buffer.extend(chunk)
+        if len(buffer) > limit:
+            raise HoogvlietError("Antwoord is onverwacht groot")
+    return bytes(buffer)
+
+
+# Het Checkjebon-bestand (±10 MB) wordt door meerdere winkels gebruikt: één download delen,
+# en niet tegelijk twee keer in het geheugen.
+_SHARED: dict[str, Any] = {"raw": None, "lock": None}
+
+
 class HoogvlietClient:
-    """Lokale Hoogvliet-catalogus, ververst hooguit één keer per dag."""
+    """Lokale Hoogvliet-catalogus, ververst hooguit één keer per dag.
+
+    Ook de basis voor andere winkels uit hetzelfde Checkjebon-bestand (Lidl).
+    """
+
+    _label = "Hoogvliet"
+    _parser = staticmethod(parse_checkjebon)
 
     def __init__(
         self,
@@ -303,6 +328,21 @@ class HoogvlietClient:
             self._fetched_at = float(data.get("fetched_at", 0)) if fresh else 0.0
 
     async def _download(self) -> bytes:
+        if _SHARED["lock"] is None:
+            _SHARED["lock"] = asyncio.Lock()
+        async with _SHARED["lock"]:
+            if _SHARED["raw"] is not None:
+                return _SHARED["raw"]  # een andere winkel haalde het net op
+            raw = await self._download_once()
+            _SHARED["raw"] = raw
+
+            def _forget() -> None:
+                _SHARED["raw"] = None
+
+            asyncio.get_running_loop().call_later(300, _forget)
+            return raw
+
+    async def _download_once(self) -> bytes:
         try:
             async with self._session.get(
                 CHECKJEBON_URL,
@@ -329,22 +369,22 @@ class HoogvlietClient:
             return
         raw = await self._download()
         # Het bestand is groot (alle supermarkten): verwerken buiten de event loop.
-        products = await asyncio.get_running_loop().run_in_executor(None, parse_checkjebon, raw)
+        products = await asyncio.get_running_loop().run_in_executor(None, self._parser, raw)
         del raw
         self._products = products
         self._fetched_at = time.time()
-        _LOGGER.debug("Hoogvliet-prijzen ververst: %s producten", len(products))
+        _LOGGER.debug("%s-prijzen ververst: %s producten", self._label, len(products))
         if self._store is not None:
             await self._store.async_save(
                 {"version": PARSER_VERSION, "fetched_at": self._fetched_at, "products": products}
             )
 
-    async def async_refresh_safe(self) -> None:
+    async def async_refresh_safe(self, force: bool = False) -> None:
         """Verversen voor op de achtergrond: fouten loggen, nooit gooien."""
         try:
-            await self.async_refresh()
+            await self.async_refresh(force=force)
         except AldiApiError as err:
-            _LOGGER.warning("Hoogvliet-prijzen verversen mislukt: %s", err)
+            _LOGGER.warning("%s-prijzen verversen mislukt: %s", self._label, err)
         finally:
             self._notify()
 
@@ -360,7 +400,7 @@ class HoogvlietClient:
                 found = await self._web.search(query)
             except AldiApiError as err:
                 # Live zoeken mislukt: de gebruiker heeft er toch wat aan met de prijslijst
-                _LOGGER.warning("Zoeken op hoogvliet.nl mislukt (%s); Checkjebon-data gebruikt", err)
+                _LOGGER.warning("Zoeken op de webshop van %s mislukt (%s); Checkjebon-data gebruikt", self._label, err)
             else:
                 return [self._public_web(p) for p in found[:limit]]
         return await self.lookup(query, limit)
@@ -376,7 +416,7 @@ class HoogvlietClient:
             try:
                 results += [self._public_web(p) for p in (await self._web.search(query))[:limit]]
             except AldiApiError as err:
-                _LOGGER.warning("Prijzen verversen via hoogvliet.nl mislukt: %s", err)
+                _LOGGER.warning("Prijzen verversen via de webshop van %s mislukt: %s", self._label, err)
         try:
             results += await self.lookup(query, limit)
         except AldiApiError:
@@ -394,7 +434,7 @@ class HoogvlietClient:
         if not self._products:
             self._kick_refresh()
             raise HoogvlietError(
-                "De Hoogvliet-prijzen worden voor het eerst opgehaald; probeer het over een minuut opnieuw"
+                f"De {self._label}-prijzen worden voor het eerst opgehaald; probeer het over een minuut opnieuw"
             )
         if time.time() - self._fetched_at >= HOOGVLIET_MAX_AGE:
             self._kick_refresh()  # de oude gegevens blijven bruikbaar

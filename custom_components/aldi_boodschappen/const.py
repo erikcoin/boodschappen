@@ -20,9 +20,23 @@ USER_AGENT = "HomeAssistant-AldiBoodschappen/0.3 (persoonlijk gebruik)"
 
 STORE_ALDI = "aldi"
 STORE_HOOGVLIET = "hoogvliet"
+STORE_LIDL = "lidl"
 STORE_PICNIC = "picnic"
-STORES = [STORE_ALDI, STORE_HOOGVLIET, STORE_PICNIC]
-STORE_LABELS = {STORE_ALDI: "Aldi", STORE_HOOGVLIET: "Hoogvliet", STORE_PICNIC: "Picnic"}
+STORES = [STORE_ALDI, STORE_HOOGVLIET, STORE_LIDL, STORE_PICNIC]
+STORE_LABELS = {
+    STORE_ALDI: "Aldi",
+    STORE_HOOGVLIET: "Hoogvliet",
+    STORE_LIDL: "Lidl",
+    STORE_PICNIC: "Picnic",
+}
+LIDL_STORAGE_KEY = f"{DOMAIN}.lidl"
+LIDL_SEARCH_URL = "https://www.lidl.nl/q/api/search"
+LIDL_BASE_URL = "https://www.lidl.nl"
+CONF_LIDL_SOURCE = "lidl_source"
+LIDL_SOURCE_CHECKJEBON = "checkjebon"
+LIDL_SOURCE_WEBSITE = "website"
+LIDL_SOURCES = [LIDL_SOURCE_CHECKJEBON, LIDL_SOURCE_WEBSITE]
+DEFAULT_LIDL_SOURCE = LIDL_SOURCE_CHECKJEBON
 
 # Picnic: geen website, alleen de app. We gebruiken dezelfde (niet-gedocumenteerde) API als de
 # app, via de bibliotheek python-picnic-api2 die ook de Picnic-integratie van Home Assistant gebruikt.

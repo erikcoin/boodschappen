@@ -3,7 +3,7 @@
     "step": {
       "user": {
         "title": "Aldi Shopping List",
-        "description": "Choose which stores to search. Pick both to search everywhere at once and see which product is cheapest. The Algolia key is only needed for Aldi: open aldi.nl, press F12, choose Network → Fetch/XHR, search the web shop and copy the value of x-algolia-api-key from the request to algolia.net. Hoogvliet needs no settings; its prices come from the open Checkjebon project and are refreshed daily. Source for Hoogvliet: 'Checkjebon' (default) uses a daily price list, without photos or real product links. 'hoogvliet.nl web shop' gives photos, links and full names, but makes one request per search to Hoogvliet's undocumented API, without their permission. Read the warning in the README first. Picnic: enter the email and password of your Picnic account (only needed if you pick Picnic). If your account uses two-step verification, you will be asked for a code next. This is the undocumented API of the Picnic app; see the warning in the README.",
+        "description": "Choose which stores to search. Pick both to search everywhere at once and see which product is cheapest. The Algolia key is only needed for Aldi: open aldi.nl, press F12, choose Network → Fetch/XHR, search the web shop and copy the value of x-algolia-api-key from the request to algolia.net. Hoogvliet needs no settings; its prices come from the open Checkjebon project and are refreshed daily. Source for Hoogvliet: 'Checkjebon' (default) uses a daily price list, without photos or real product links. 'hoogvliet.nl web shop' gives photos, links and full names, but makes one request per search to Hoogvliet's undocumented API, without their permission. Read the warning in the README first. Picnic: enter the email and password of your Picnic account (only needed if you pick Picnic). If your account uses two-step verification, you will be asked for a code next. This is the undocumented API of the Picnic app; see the warning in the README. Lidl: prices come from the open Checkjebon data (via boodschaapje.nl), updated daily, without photos and often without a pack size; they are not live prices from lidl.nl. Source for Lidl: 'Checkjebon' (default) uses a daily price list without photos. 'lidl.nl web shop' gives photos and current prices, but Lidl forbids this in robots.txt and often blocks it with a protection we do not bypass; if it fails, the integration falls back to the price list. Read the warning in the README first.",
         "data": {
           "reset_enabled": "Start new week automatically",
           "reset_weekday": "Reset day",
@@ -13,7 +13,8 @@
           "stores": "Stores to search",
           "hoogvliet_source": "Source for Hoogvliet",
           "picnic_username": "Picnic account email",
-          "picnic_password": "Picnic account password"
+          "picnic_password": "Picnic account password",
+          "lidl_source": "Source for Lidl"
         }
       },
       "picnic_channel": {
@@ -60,9 +61,10 @@
           "stores": "Stores to search",
           "hoogvliet_source": "Source for Hoogvliet",
           "picnic_username": "Picnic account email",
-          "picnic_password": "Picnic account password"
+          "picnic_password": "Picnic account password",
+          "lidl_source": "Source for Lidl"
         },
-        "description": "Choose which stores to search. Pick both to search everywhere at once and see which product is cheapest. The Algolia key is only needed for Aldi: open aldi.nl, press F12, choose Network → Fetch/XHR, search the web shop and copy the value of x-algolia-api-key from the request to algolia.net. Hoogvliet needs no settings; its prices come from the open Checkjebon project and are refreshed daily. Source for Hoogvliet: 'Checkjebon' (default) uses a daily price list, without photos or real product links. 'hoogvliet.nl web shop' gives photos, links and full names, but makes one request per search to Hoogvliet's undocumented API, without their permission. Read the warning in the README first. Picnic: enter the email and password of your Picnic account (only needed if you pick Picnic). If your account uses two-step verification, you will be asked for a code next. This is the undocumented API of the Picnic app; see the warning in the README."
+        "description": "Choose which stores to search. Pick both to search everywhere at once and see which product is cheapest. The Algolia key is only needed for Aldi: open aldi.nl, press F12, choose Network → Fetch/XHR, search the web shop and copy the value of x-algolia-api-key from the request to algolia.net. Hoogvliet needs no settings; its prices come from the open Checkjebon project and are refreshed daily. Source for Hoogvliet: 'Checkjebon' (default) uses a daily price list, without photos or real product links. 'hoogvliet.nl web shop' gives photos, links and full names, but makes one request per search to Hoogvliet's undocumented API, without their permission. Read the warning in the README first. Picnic: enter the email and password of your Picnic account (only needed if you pick Picnic). If your account uses two-step verification, you will be asked for a code next. This is the undocumented API of the Picnic app; see the warning in the README. Lidl: prices come from the open Checkjebon data (via boodschaapje.nl), updated daily, without photos and often without a pack size; they are not live prices from lidl.nl. Source for Lidl: 'Checkjebon' (default) uses a daily price list without photos. 'lidl.nl web shop' gives photos and current prices, but Lidl forbids this in robots.txt and often blocks it with a protection we do not bypass; if it fails, the integration falls back to the price list. Read the warning in the README first."
       },
       "picnic_channel": {
         "title": "Picnic: verification code",
@@ -108,7 +110,8 @@
       "options": {
         "aldi": "Aldi",
         "hoogvliet": "Hoogvliet",
-        "picnic": "Picnic"
+        "picnic": "Picnic",
+        "lidl": "Lidl"
       }
     },
     "hoogvliet_source": {
@@ -121,6 +124,12 @@
       "options": {
         "SMS": "SMS",
         "EMAIL": "Email"
+      }
+    },
+    "lidl_source": {
+      "options": {
+        "checkjebon": "Checkjebon price list (default)",
+        "website": "lidl.nl web shop (see warning in README)"
       }
     }
   },

@@ -1,6 +1,6 @@
 # Aldi Boodschappen voor Home Assistant
 
-Boodschappenlijst met producten van **Aldi**, **Hoogvliet** en/of **Picnic**, met prijzen. Kies in de instellingen in welke winkels je zoekt; kies je beide, dan zie je welk product het goedkoopst is.
+Boodschappenlijst met producten van **Aldi**, **Hoogvliet**, **Lidl** en/of **Picnic**, met prijzen. Kies in de instellingen in welke winkels je zoekt; kies je beide, dan zie je welk product het goedkoopst is.
 
 - Typ een zoekterm (bijv. *pink lady*) en kies uit alle gevonden producten, met foto, hoeveelheid en prijs.
 - **Prijzen vergelijken**: zoeken gaat over alle gekozen winkels tegelijk. Elk resultaat toont de prijs per kg, liter of stuk, je kunt sorteren op laagste prijs, en het goedkoopste product per eenheid krijgt een label.
@@ -104,6 +104,25 @@ In de instellingen kies je bij **Bron voor Hoogvliet** tussen:
 > Mislukt een verzoek (of verandert Hoogvliet de API), dan valt de integratie terug op de Checkjebon-prijslijst en staat er een regel in het Home Assistant-log.
 >
 > Prijzen van producten die je via de webshop hebt toegevoegd worden niet automatisch bijgewerkt (alleen Aldi en Checkjebon-producten).
+
+## Lidl
+
+De webshop van Lidl staat achter een beveiliging die geautomatiseerde verzoeken blokkeert (een eerdere versie liep daar op vast). Die omzeilen we niet. In plaats daarvan gebruikt de integratie, net als bij Hoogvliet, de open data van [Checkjebon](https://github.com/supermarkt/checkjebon), die de Lidl-prijzen van boodschaapje.nl overneemt:
+
+- Het bestand wordt hooguit één keer per dag opgehaald (samen met dat van Hoogvliet, in één download), op de achtergrond; zoeken doet geen verzoek naar Lidl.
+- Het zijn de prijzen zoals boodschaapje.nl ze het laatst heeft vastgelegd, **geen live prijzen van lidl.nl**. Ze kunnen afwijken of achterlopen.
+- Er zijn **geen foto's**, en bij veel producten staat geen hoeveelheid (dan is er ook geen prijs per kg of liter om mee te vergelijken). Een product in je lijst opent de pagina op boodschaapje.nl.
+- De lijst bevat alles wat boodschaapje.nl kent, ook non-food.
+
+### Lidl via de webshop van lidl.nl (optioneel) — lees dit eerst
+
+In de instellingen kun je bij **Bron voor Lidl** kiezen voor de **webshop van lidl.nl**: dan komen foto's, actuele prijzen en hoeveelheden rechtstreeks van Lidl, zoals in de allereerste versie.
+
+> **Waarschuwing.** Lidl verbiedt automatisch ophalen in `robots.txt` en zet de webshop achter een beveiliging (Myra) die geautomatiseerde verzoeken blokkeert, met status 401/403/503 of een "Security Check"-pagina. Daar liep een eerdere versie op vast. Door deze optie te kiezen neem je het gebruik zelf voor je rekening.
+>
+> De integratie doet per zoekopdracht **één gewoon verzoek** met een eerlijke User-Agent (`HomeAssistant-AldiBoodschappen/…`), nooit sneller dan één per 3 seconden, en onthoudt resultaten 10 minuten. **Wordt het verzoek geweigerd, dan wordt er niets omzeild**: geen vermomming als browser, geen cookies, geen oplossen van een "check" en geen herhaalpogingen. De integratie valt dan terug op de Checkjebon-prijslijst en zet de reden (met het begin van het antwoord) in het Home Assistant-log.
+>
+> Of dit bij jou werkt hangt dus af van of Lidl het verzoek vanaf jouw verbinding toelaat, en dat kan per keer verschillen. De verwerking van het antwoord is **niet getest tegen het echte antwoord** van Lidl (ik kon het niet bereiken). Meld de logregel als er niets verschijnt.
 
 ## Picnic (optioneel) — lees dit eerst
 
